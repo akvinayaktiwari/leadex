@@ -5,3 +5,9 @@ node_modules/
 !.env.example
 dist/
 .gstack/
+cdk.out/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+cdk.context.json

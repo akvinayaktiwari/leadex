@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+.git
+.gstack
+docs
+frontend/*
+!frontend/package.json
+infra/*
+!infra/package.json
