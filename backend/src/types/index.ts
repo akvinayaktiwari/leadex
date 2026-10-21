@@ -1,3 +1,5 @@
+import type { ZodType } from 'zod'
+
 export type Stage = 'dev' | 'staging' | 'prod'
 
 export interface ApiEnv {
@@ -16,7 +18,11 @@ export interface RunStoreEnv {
   DYNAMODB_ENDPOINT?: string | undefined
 }
 
-export interface WorkerEnv extends ApiEnv, RunStoreEnv {}
+export interface WorkerEnv extends ApiEnv, RunStoreEnv {
+  ANTHROPIC_API_KEY: string
+  LLM_MODEL_SMART: string
+  LLM_MODEL_FAST: string
+}
 
 export interface HealthStatus {
   status: 'ok'
@@ -205,4 +211,92 @@ export interface LayerViolation {
   file: string
   importPath: string
   rule: string
+}
+
+// ---- Analysis pipeline ----
+
+export interface ProductProfile {
+  domain: string
+  name: string
+  oneLiner: string
+  valueProps: string[]
+  category: string
+  pricingSignals: string[]
+  // ISO-3166 alpha-2 codes, or ['GLOBAL'].
+  servedMarkets: string[]
+}
+
+export interface CrawledPage {
+  url: string
+  path: string
+  title: string
+  description: string
+  text: string
+}
+
+export interface CrawledSite {
+  domain: string
+  origin: string
+  pages: CrawledPage[]
+  blockedByRobots: number
+  failedPages: number
+}
+
+// Shared by the steps of one analysis run (one instance per run, created by the pipeline factory).
+export interface AnalysisState {
+  site?: CrawledSite | undefined
+  profile?: ProductProfile | undefined
+}
+
+export type FetchFailure = 'blocked_host' | 'timeout' | 'http_error' | 'unsupported_type' | 'too_large' | 'network'
+
+export type FetchResult =
+  | { ok: true; finalUrl: string; status: number; body: string }
+  | { ok: false; reason: FetchFailure; status?: number | undefined }
+
+export interface FetchRequest {
+  url: string
+  accept: 'html' | 'text'
+  timeoutMs: number
+}
+
+export interface SiteFetchRepository {
+  fetchText(request: FetchRequest): Promise<FetchResult>
+}
+
+export type LlmEffort = 'low' | 'medium' | 'high'
+
+export interface LlmTurn {
+  role: 'user' | 'assistant'
+  text: string
+}
+
+export interface LlmJsonRequest {
+  model: string
+  system: string
+  turns: LlmTurn[]
+  // Sent to the model as the output JSON schema; the caller still validates the result.
+  schema: ZodType
+  maxTokens: number
+  effort: LlmEffort
+}
+
+export interface LlmUsage {
+  model: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+}
+
+export type LlmJsonResponse =
+  | { ok: true; value: unknown; rawText: string; usage: LlmUsage }
+  | { ok: false; reason: 'refusal' | 'truncated' | 'not_json'; rawText: string; usage: LlmUsage }
+
+export interface LlmRepository {
+  generateJson(request: LlmJsonRequest): Promise<LlmJsonResponse>
+}
+
+export interface LlmModels {
+  smart: string
+  fast: string
 }

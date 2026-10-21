@@ -23,6 +23,7 @@ new LeadexStack(app, `Leadex-${stage}`, {
   stage,
   frontendUrl: requireEnv('FRONTEND_URL'),
   pipelineVersion: process.env.PIPELINE_VERSION ?? '1',
+  llmModels: { smart: requireEnv('LLM_MODEL_SMART'), fast: requireEnv('LLM_MODEL_FAST') },
   ...(process.env.SENTRY_DSN ? { sentryDsn: process.env.SENTRY_DSN } : {}),
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: requireEnv('AWS_REGION') },
 })

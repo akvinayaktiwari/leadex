@@ -8,6 +8,7 @@ import type * as iam from 'aws-cdk-lib/aws-iam'
 import * as kms from 'aws-cdk-lib/aws-kms'
 import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs'
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager'
 import * as sqs from 'aws-cdk-lib/aws-sqs'
 import type { Construct } from 'constructs'
 
@@ -17,6 +18,7 @@ export interface LeadexStackProps extends StackProps {
   stage: Stage
   frontendUrl: string
   pipelineVersion: string
+  llmModels: { smart: string; fast: string }
   sentryDsn?: string
 }
 
@@ -54,7 +56,7 @@ export class LeadexStack extends Stack {
     const queue = this.createQueues(key)
     const environment = this.sharedEnvironment(props, tables, queue, key)
     const { api, stream } = this.createFunctions(environment, tables, queue, key)
-    this.createWorker(environment, tables, queue, key)
+    this.createWorker({ ...environment, LLM_MODEL_SMART: props.llmModels.smart, LLM_MODEL_FAST: props.llmModels.fast }, tables, queue, key, props.stage)
     new CfnOutput(this, 'ApiUrl', { value: api.url })
     new CfnOutput(this, 'StreamUrl', { value: stream.url })
     new CfnOutput(this, 'RunsQueueUrl', { value: queue.queueUrl })
@@ -154,7 +156,10 @@ export class LeadexStack extends Stack {
     tables: Map<string, dynamodb.Table>,
     queue: sqs.Queue,
     key: kms.Key,
+    stage: Stage,
   ): void {
+    // Created once per stage outside CDK (see README) so the key never appears in a template or in git.
+    const appSecret = secretsmanager.Secret.fromSecretNameV2(this, 'AppSecret', `leadex/${stage}/app`)
     // Public subnets with no NAT gateway keep idle cost near zero; tasks get public IPs for egress.
     const vpc = new ec2.Vpc(this, 'WorkerVpc', {
       maxAzs: 2,
@@ -174,6 +179,7 @@ export class LeadexStack extends Stack {
       runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64, operatingSystemFamily: ecs.OperatingSystemFamily.LINUX },
       // Lambda sets (and reserves) AWS_REGION itself; the Fargate container needs it passed in.
       environment: { ...environment, AWS_REGION: this.region },
+      secrets: { ANTHROPIC_API_KEY: ecs.Secret.fromSecretsManager(appSecret, 'ANTHROPIC_API_KEY') },
       circuitBreaker: { rollback: true },
       minHealthyPercent: 100,
     })

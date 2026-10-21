@@ -12,6 +12,7 @@ beforeAll(() => {
     stage: 'dev',
     frontendUrl: 'http://localhost:3000',
     pipelineVersion: '1',
+    llmModels: { smart: 'claude-opus-5-5', fast: 'claude-opus-5-5' },
     env: { account: '111111111111', region: 'ap-south-1' },
   })
   template = Template.fromStack(stack)
@@ -83,8 +84,17 @@ describe('LeadexStack', () => {
     const containers = taskDefinitions.flatMap((resource) => resource.Properties.ContainerDefinitions as { Environment: { Name: string; Value: unknown }[] }[])
     const environment = new Map(containers.flatMap((container) => container.Environment.map((entry) => [entry.Name, entry.Value] as const)))
     expect(environment.get('AWS_REGION')).toBe('ap-south-1')
-    for (const name of ['TABLE_RUNS', 'TABLE_RUN_EVENTS', 'SQS_RUNS_QUEUE_URL', 'STAGE', 'FRONTEND_URL', 'PIPELINE_VERSION']) {
+    for (const name of ['TABLE_RUNS', 'TABLE_RUN_EVENTS', 'SQS_RUNS_QUEUE_URL', 'STAGE', 'FRONTEND_URL', 'PIPELINE_VERSION', 'LLM_MODEL_SMART', 'LLM_MODEL_FAST']) {
       expect(environment.has(name), name).toBe(true)
     }
+  })
+
+  // protects=the Anthropic key reaches the worker as an ECS secret from Secrets Manager, never as a plain env value;
+  // fails_when=ANTHROPIC_API_KEY appears in container Environment (and so in the template) or the secret is not wired;
+  // no_claim=does not check that the secret exists in the account (created by hand before deploy).
+  it('injects the Anthropic key as a secret, not plain env', () => {
+    const containers = Object.values(template.findResources('AWS::ECS::TaskDefinition')).flatMap((resource) => resource.Properties.ContainerDefinitions as { Environment: { Name: string }[]; Secrets?: { Name: string }[] }[])
+    expect(containers.flatMap((container) => container.Environment.map((entry) => entry.Name))).not.toContain('ANTHROPIC_API_KEY')
+    expect(containers.flatMap((container) => (container.Secrets ?? []).map((entry) => entry.Name))).toContain('ANTHROPIC_API_KEY')
   })
 })

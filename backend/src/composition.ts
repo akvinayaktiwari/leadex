@@ -1,17 +1,14 @@
-// Composition root: the only place that builds SDK clients and wires repositories into services.
+// Composition root for the HTTP Lambdas: builds SDK clients and wires repositories into services.
+// The worker's pipeline wiring lives in worker-composition.ts so the API bundles don't ship the crawler or LLM SDK.
 import { sleep, systemClock } from './lib/clock.js'
 import { createDocumentClient } from './lib/dynamo-client.js'
-import { newRunId } from './lib/ids.js'
 import { createSqsClient } from './lib/sqs-client.js'
 import { createRunEventsTableRepository } from './repositories/run-events-table-repository.js'
 import { createRunQueueRepository } from './repositories/run-queue-repository.js'
 import { createRunsTableRepository } from './repositories/runs-table-repository.js'
-import { PIPELINES } from './services/pipelines.js'
-import { createRunEngineService } from './services/run-engine-service.js'
 import { RUN_STREAM_DEFAULTS, createRunStreamService } from './services/run-stream-service.js'
 import type {
   ApiServices,
-  RunEngineService,
   RunEventsRepository,
   RunQueueRepository,
   RunStoreEnv,
@@ -37,8 +34,4 @@ export function createApiServices(store: RunStore): ApiServices {
   return {
     runStream: createRunStreamService({ ...store, clock: systemClock, sleep, options: RUN_STREAM_DEFAULTS }),
   }
-}
-
-export function createRunEngine(store: RunStore): RunEngineService {
-  return createRunEngineService({ ...store, pipelines: PIPELINES, clock: systemClock, newId: newRunId })
 }

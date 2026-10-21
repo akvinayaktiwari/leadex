@@ -49,3 +49,17 @@ export const runEventSchema = z.discriminatedUnion('kind', [
     error: runErrorSchema.optional(),
   }),
 ]) satisfies z.ZodType<RunEvent>
+
+const marketCodeSchema = z.string().regex(/^([A-Z]{2}|GLOBAL)$/, 'Use an ISO-3166 alpha-2 code (e.g. "IN") or "GLOBAL"')
+
+// What the model returns for the profile step; the domain is added by the step, never by the model.
+export const productProfileDraftSchema = z.object({
+  name: z.string().min(1).max(80),
+  oneLiner: z.string().min(1).max(160),
+  valueProps: z.array(z.string().min(1).max(200)).min(3).max(6),
+  category: z.string().min(1).max(80),
+  pricingSignals: z.array(z.string().min(1).max(120)).max(6),
+  servedMarkets: z.array(marketCodeSchema).min(1).max(15),
+})
+
+export type ProductProfileDraft = z.infer<typeof productProfileDraftSchema>
