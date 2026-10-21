@@ -16,6 +16,7 @@ function fakeQueue(messages: QueueMessage[]): FakeQueue {
     async remove(receiptHandle: string): Promise<void> {
       removed.push(receiptHandle)
     },
+    async send(): Promise<void> {},
   }
 }
 
@@ -71,6 +72,7 @@ describe('worker message handling', () => {
         throw new Error('queue unreachable')
       },
       async remove(): Promise<void> {},
+      async send(): Promise<void> {},
     }
     await runWorkerLoop(
       failingQueue,

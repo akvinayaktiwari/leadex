@@ -13,7 +13,9 @@
     "build:worker": "esbuild worker.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/worker.mjs --banner:js=\"import { createRequire as __leadexCreateRequire } from 'module'; const require = __leadexCreateRequire(import.meta.url);\""
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1154.0",
     "@aws-sdk/client-sqs": "^3.1153.0",
+    "@aws-sdk/lib-dynamodb": "^3.1154.0",
     "@hono/node-server": "^2.1.5",
     "@sentry/node": "^11.8.0",
     "hono": "^4.13.13",
