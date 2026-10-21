@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (strict)
+        run: npm run typecheck
+      - name: Test (includes layering check, criterion 13)
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: CDK synth
+        working-directory: infra
+        env:
+          STAGE: dev
+          AWS_REGION: ap-south-1
+          FRONTEND_URL: http://localhost:3000
+        run: npx cdk synth --quiet
