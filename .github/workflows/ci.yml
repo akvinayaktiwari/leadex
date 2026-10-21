@@ -11,6 +11,11 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:2.6.1
+        ports:
+          - 8000:8000
     env:
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
@@ -23,6 +28,8 @@ jobs:
       - name: Typecheck (strict)
         run: npm run typecheck
       - name: Test (includes layering check, criterion 13)
+        env:
+          DYNAMODB_ENDPOINT: http://localhost:8000
         run: npm test
       - name: Build
         run: npm run build

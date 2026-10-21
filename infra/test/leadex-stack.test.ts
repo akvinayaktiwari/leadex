@@ -74,4 +74,17 @@ describe('LeadexStack', () => {
       },
     })
   })
+
+  // protects=the worker container gets everything the run engine reads at startup (getWorkerEnv);
+  // fails_when=AWS_REGION, a run table or the queue URL is missing, so the task crash-loops on boot;
+  // no_claim=does not start the container or check IAM grants.
+  it('gives the worker container the run engine env', () => {
+    const taskDefinitions = Object.values(template.findResources('AWS::ECS::TaskDefinition'))
+    const containers = taskDefinitions.flatMap((resource) => resource.Properties.ContainerDefinitions as { Environment: { Name: string; Value: unknown }[] }[])
+    const environment = new Map(containers.flatMap((container) => container.Environment.map((entry) => [entry.Name, entry.Value] as const)))
+    expect(environment.get('AWS_REGION')).toBe('ap-south-1')
+    for (const name of ['TABLE_RUNS', 'TABLE_RUN_EVENTS', 'SQS_RUNS_QUEUE_URL', 'STAGE', 'FRONTEND_URL', 'PIPELINE_VERSION']) {
+      expect(environment.has(name), name).toBe(true)
+    }
+  })
 })

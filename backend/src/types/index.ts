@@ -8,9 +8,15 @@ export interface ApiEnv {
   SENTRY_DSN?: string | undefined
 }
 
-export interface WorkerEnv extends ApiEnv {
+export interface RunStoreEnv {
+  AWS_REGION: string
+  TABLE_RUNS: string
+  TABLE_RUN_EVENTS: string
   SQS_RUNS_QUEUE_URL: string
+  DYNAMODB_ENDPOINT?: string | undefined
 }
+
+export interface WorkerEnv extends ApiEnv, RunStoreEnv {}
 
 export interface HealthStatus {
   status: 'ok'
@@ -42,9 +48,149 @@ export interface QueueMessage {
 export interface RunQueueRepository {
   receive(maxMessages: number, waitSeconds: number): Promise<QueueMessage[]>
   remove(receiptHandle: string): Promise<void>
+  send(job: RunJobMessage): Promise<void>
 }
 
 export type RunJobHandler = (job: RunJobMessage) => Promise<void>
+
+// ---- Run engine ----
+
+export type RunStatus = 'queued' | 'running' | 'done' | 'failed'
+
+export type StepId =
+  | 'crawl'
+  | 'profile'
+  | 'competitors'
+  | 'segments'
+  | 'prospect'
+  | 'qualify'
+  | 'draft'
+  | 'charge'
+
+export type StepState = 'started' | 'completed' | 'failed'
+
+export type ArtifactKind = 'profile' | 'competitor' | 'segment' | 'lead_batch'
+
+export interface RunErrorInfo {
+  code: string
+  message: string
+}
+
+export interface RunRecord {
+  runId: string
+  type: RunType
+  domain: string
+  userId?: string | undefined
+  status: RunStatus
+  createdAt: string
+  updatedAt: string
+  error?: RunErrorInfo | undefined
+}
+
+export interface StepEventBody {
+  kind: 'step'
+  step: StepId
+  state: StepState
+  label: string
+  durationMs?: number | undefined
+}
+
+export interface ArtifactEventBody {
+  kind: 'artifact'
+  step: StepId
+  artifact: ArtifactKind
+  // Validated per artifact kind by the step that emits it (zod schemas in lib/schemas.ts).
+  data: unknown
+}
+
+export interface AgentNoteEventBody {
+  kind: 'agent_note'
+  text: string
+}
+
+export interface EndEventBody {
+  kind: 'end'
+  status: 'done' | 'failed'
+  error?: RunErrorInfo | undefined
+}
+
+export type RunEventBody = StepEventBody | ArtifactEventBody | AgentNoteEventBody | EndEventBody
+
+export type RunEvent = RunEventBody & { seq: number; ts: string }
+
+// What a pipeline step may emit itself; step and end events belong to the engine.
+export type StepEmission = ArtifactEventBody | AgentNoteEventBody
+
+export interface RunsRepository {
+  create(run: RunRecord): Promise<void>
+  get(runId: string): Promise<RunRecord | undefined>
+  setStatus(runId: string, status: RunStatus, updatedAt: string, error?: RunErrorInfo): Promise<void>
+}
+
+export interface RunEventsRepository {
+  // Fails if an event with the same seq already exists for the run.
+  append(runId: string, event: RunEvent): Promise<void>
+  listAfter(runId: string, afterSeq: number, limit: number): Promise<RunEvent[]>
+  // 0 when the run has no events.
+  lastSeq(runId: string): Promise<number>
+}
+
+export interface StepContext {
+  run: RunRecord
+  emit(emission: StepEmission): Promise<void>
+}
+
+export interface PipelineStep {
+  id: StepId
+  label: string
+  execute(context: StepContext): Promise<void>
+}
+
+// A factory per run, so a pipeline's steps can share typed state through a closure.
+export type PipelineFactory = (run: RunRecord) => PipelineStep[]
+
+export type PipelineRegistry = Partial<Record<RunType, PipelineFactory>>
+
+export interface Clock {
+  now(): Date
+}
+
+export interface CreateRunInput {
+  type: RunType
+  domain: string
+  userId?: string | undefined
+}
+
+export interface RunEngineService {
+  createRun(input: CreateRunInput): Promise<RunRecord>
+  executeRun(job: RunJobMessage): Promise<void>
+}
+
+export interface RunEventSink {
+  send(event: RunEvent): Promise<void>
+  heartbeat(): Promise<void>
+  isClosed(): boolean
+}
+
+export type RunStreamEnd = 'ended' | 'timeout' | 'client_closed'
+
+export type RunAccess = { ok: true; run: RunRecord } | { ok: false }
+
+export interface RunStreamService {
+  authorize(runId: string, requesterUserId: string | undefined): Promise<RunAccess>
+  stream(runId: string, afterSeq: number, sink: RunEventSink): Promise<RunStreamEnd>
+}
+
+export interface RunStreamOptions {
+  pollMs: number
+  heartbeatMs: number
+  maxDurationMs: number
+  pageSize: number
+}
+
+export interface ApiServices {
+  runStream: RunStreamService
+}
 
 export type SentryRuntime = 'api' | 'stream' | 'worker'
 

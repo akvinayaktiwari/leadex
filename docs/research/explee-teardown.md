@@ -138,6 +138,16 @@ Review UI: "Found N unique leads. Review and approve to start outreach. Auto-app
 - Budget after launch: `campaign_floor_usd: 4`. *Inferred:* a minimum daily spend reserved per active campaign.
 - Pause while sending: `POST /api/agent-chat/segments/{id}/pause {}` → `{accepted:true}`; status "Paused · Stage: Outreach", button Resume. "Stop" only exists before outreach.
 
+### 6d. Day 2 (checked 2026-10-21 08:06 UTC)
+
+- Volume ramped overnight: 13 first-touch emails on 10-20, then 123 on 10-21 before 08:06 UTC. Total 136, 0 follow-ups yet, 0 bounces, `queued: 5`.
+- Per campaign: Commercial Developers 29, Plotted developers 28, Villa developers 39, Brokerage Firms 35, Prelaunch Teams 5 (listening, i.e. paused). The UI shows a per-campaign pace hint ("~4 emails/day") that doesn't match actual volume (29 in a day).
+- Spend $5.44 of the $10 daily budget, balance $24.52 of $30. At $0.04/email the daily cap allows about 250 sends a day across campaigns.
+- 2 replies (1.5%), both from Villa developers, both classified `intent: not_interested`, `temperature: cold`, `need_reply: false`. No auto-reply was queued for them.
+- New sender domain seen: `lineturn.co`, with the From display name set to the customer's sender name.
+- Data bug: in `dashboard.last_replies[]`, `company_name` holds the lead's email address. The real company is in `company_display`.
+- `dashboard` also returns `setup_steps` (project_docs, geography, booking_link, follow_ups, reply_copies) with `done` flags. This is their post-launch checklist nudging users to add docs and reply copy.
+
 ## 7. Sending infrastructure (partial)
 
 - Pre-warmed mailboxes owned by Explee, rotated per send. The sender display name defaults to a persona per mailbox.

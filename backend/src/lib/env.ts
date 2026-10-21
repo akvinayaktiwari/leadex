@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ApiEnv, WorkerEnv } from '../types/index.js'
+import type { ApiEnv, RunStoreEnv, WorkerEnv } from '../types/index.js'
 
 const apiEnvSchema = z.object({
   STAGE: z.enum(['dev', 'staging', 'prod']),
@@ -9,9 +9,16 @@ const apiEnvSchema = z.object({
   SENTRY_DSN: z.string().optional(),
 }) satisfies z.ZodType<ApiEnv>
 
-const workerEnvSchema = apiEnvSchema.extend({
+const runStoreEnvSchema = z.object({
+  AWS_REGION: z.string().min(1),
+  TABLE_RUNS: z.string().min(1),
+  TABLE_RUN_EVENTS: z.string().min(1),
   SQS_RUNS_QUEUE_URL: z.url(),
-}) satisfies z.ZodType<WorkerEnv>
+  // Local development and tests only (DynamoDB Local). Unset in AWS.
+  DYNAMODB_ENDPOINT: z.url().optional(),
+}) satisfies z.ZodType<RunStoreEnv>
+
+const workerEnvSchema = apiEnvSchema.extend(runStoreEnvSchema.shape) satisfies z.ZodType<WorkerEnv>
 
 let cachedApiEnv: ApiEnv | undefined
 
@@ -27,6 +34,10 @@ function parseEnv<T>(schema: z.ZodType<T>, source: NodeJS.ProcessEnv): T {
 export function getApiEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
   cachedApiEnv ??= parseEnv(apiEnvSchema, source)
   return cachedApiEnv
+}
+
+export function getRunStoreEnv(source: NodeJS.ProcessEnv = process.env): RunStoreEnv {
+  return parseEnv(runStoreEnvSchema, source)
 }
 
 export function getWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEnv {

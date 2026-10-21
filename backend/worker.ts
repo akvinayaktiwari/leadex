@@ -1,9 +1,7 @@
 // Fargate worker: long-lived SQS consumer for pipeline runs. No Lambda time limit.
+import { createRunEngine, createRunStore } from './src/composition.js'
 import { getWorkerEnv } from './src/lib/env.js'
 import { initSentry } from './src/lib/sentry.js'
-import { createSqsClient } from './src/lib/sqs-client.js'
-import { createRunQueueRepository } from './src/repositories/run-queue-repository.js'
-import { handleRunJob } from './src/services/run-job-service.js'
 import { runWorkerLoop } from './src/services/worker-service.js'
 
 const env = getWorkerEnv()
@@ -16,5 +14,6 @@ const stop = (): void => {
 process.on('SIGTERM', stop)
 process.on('SIGINT', stop)
 
-const queue = createRunQueueRepository(createSqsClient(env.AWS_REGION), env.SQS_RUNS_QUEUE_URL)
-await runWorkerLoop(queue, handleRunJob, () => stopping)
+const store = createRunStore(env)
+const engine = createRunEngine(store)
+await runWorkerLoop(store.queue, (job) => engine.executeRun(job), () => stopping)

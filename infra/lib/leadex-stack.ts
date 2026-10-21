@@ -172,7 +172,8 @@ export class LeadexStack extends Stack {
       assignPublicIp: true,
       taskSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64, operatingSystemFamily: ecs.OperatingSystemFamily.LINUX },
-      environment,
+      // Lambda sets (and reserves) AWS_REGION itself; the Fargate container needs it passed in.
+      environment: { ...environment, AWS_REGION: this.region },
       circuitBreaker: { rollback: true },
       minHealthyPercent: 100,
     })

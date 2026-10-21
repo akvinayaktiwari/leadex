@@ -1,5 +1,5 @@
-import { DeleteMessageCommand, ReceiveMessageCommand, type SQSClient } from '@aws-sdk/client-sqs'
-import type { QueueMessage, RunQueueRepository } from '../types/index.js'
+import { DeleteMessageCommand, ReceiveMessageCommand, SendMessageCommand, type SQSClient } from '@aws-sdk/client-sqs'
+import type { QueueMessage, RunJobMessage, RunQueueRepository } from '../types/index.js'
 
 export function createRunQueueRepository(client: SQSClient, queueUrl: string): RunQueueRepository {
   return {
@@ -19,6 +19,9 @@ export function createRunQueueRepository(client: SQSClient, queueUrl: string): R
     },
     async remove(receiptHandle: string): Promise<void> {
       await client.send(new DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: receiptHandle }))
+    },
+    async send(job: RunJobMessage): Promise<void> {
+      await client.send(new SendMessageCommand({ QueueUrl: queueUrl, MessageBody: JSON.stringify(job) }))
     },
   }
 }

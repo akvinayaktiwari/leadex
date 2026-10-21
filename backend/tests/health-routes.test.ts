@@ -1,9 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { resetEnvCacheForTests } from '../src/lib/env.js'
 import { createApp } from '../src/routes/index.js'
-import type { ApiErrorBody, HealthStatus } from '../src/types/index.js'
+import type { ApiErrorBody, ApiServices, HealthStatus } from '../src/types/index.js'
 
 const FRONTEND_URL = 'http://localhost:3000'
+
+// Health and error routes never touch run services; these throw if they ever do.
+const unusedServices: ApiServices = {
+  runStream: {
+    authorize: () => Promise.reject(new Error('not used')),
+    stream: () => Promise.reject(new Error('not used')),
+  },
+}
 
 function setTestEnv(): void {
   process.env.STAGE = 'dev'
@@ -23,7 +31,7 @@ describe('health and error routes', () => {
   // fails_when=route missing, wrong status, or values hardcoded instead of read from env;
   // no_claim=does not prove the Lambda adapter or Function URL wiring.
   it('returns health from env', async () => {
-    const response = await createApp().request('/api/health')
+    const response = await createApp(unusedServices).request('/api/health')
     expect(response.status).toBe(200)
     const body = (await response.json()) as HealthStatus
     expect(body).toMatchObject({ status: 'ok', service: 'leadex-api', stage: 'dev', pipelineVersion: '1' })
@@ -33,7 +41,7 @@ describe('health and error routes', () => {
   // fails_when=Hono's default text 404 leaks out;
   // no_claim=does not cover 405 handling.
   it('returns a JSON 404 for unknown routes', async () => {
-    const response = await createApp().request('/api/nope')
+    const response = await createApp(unusedServices).request('/api/nope')
     expect(response.status).toBe(404)
     const body = (await response.json()) as ApiErrorBody
     expect(body.error.code).toBe('not_found')
@@ -43,9 +51,9 @@ describe('health and error routes', () => {
   // fails_when=wildcard origin or no CORS header for the frontend;
   // no_claim=does not test preflight for every method.
   it('allows CORS only for the configured frontend', async () => {
-    const allowed = await createApp().request('/api/health', { headers: { Origin: FRONTEND_URL } })
+    const allowed = await createApp(unusedServices).request('/api/health', { headers: { Origin: FRONTEND_URL } })
     expect(allowed.headers.get('access-control-allow-origin')).toBe(FRONTEND_URL)
-    const other = await createApp().request('/api/health', { headers: { Origin: 'https://evil.example' } })
+    const other = await createApp(unusedServices).request('/api/health', { headers: { Origin: 'https://evil.example' } })
     expect(other.headers.get('access-control-allow-origin')).not.toBe('https://evil.example')
   })
 
@@ -55,6 +63,6 @@ describe('health and error routes', () => {
   it('throws a clear error when required env is missing', () => {
     delete process.env.FRONTEND_URL
     resetEnvCacheForTests()
-    expect(() => createApp()).toThrow(/FRONTEND_URL/)
+    expect(() => createApp(unusedServices)).toThrow(/FRONTEND_URL/)
   })
 })
