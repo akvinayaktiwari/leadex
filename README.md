@@ -35,10 +35,21 @@ npm run dev --workspace backend          # http://localhost:8787/api/health
 # local frontend (copy frontend/.env.example to frontend/.env.local)
 npm run dev --workspace frontend         # http://localhost:3000
 
+# backend tests against DynamoDB Local (otherwise those 4 tests skip)
+docker run -d -p 8000:8000 amazon/dynamodb-local:2.6.1
+DYNAMODB_ENDPOINT=http://localhost:8000 npm test --workspace backend
+
 # infrastructure
 cd infra
-STAGE=dev AWS_REGION=ap-south-1 FRONTEND_URL=https://<your-frontend> npx cdk synth
-STAGE=dev AWS_REGION=ap-south-1 FRONTEND_URL=https://<your-frontend> npx cdk deploy
+export STAGE=dev AWS_REGION=ap-south-1 FRONTEND_URL=https://<your-frontend> LLM_MODEL_SMART=claude-opus-5-5 LLM_MODEL_FAST=claude-opus-5-5
+npx cdk synth
+npx cdk deploy
+```
+
+Before the first deploy of a stage, create its app secret once (the worker reads `ANTHROPIC_API_KEY` from it):
+
+```bash
+aws secretsmanager create-secret --name leadex/dev/app --secret-string '{"ANTHROPIC_API_KEY":"<key>"}'
 ```
 
 All configuration comes from environment variables; see `backend/.env.example` and `frontend/.env.example`.

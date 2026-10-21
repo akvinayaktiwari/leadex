@@ -1,6 +1,21 @@
-import type { PipelineRegistry } from '../types/index.js'
+import type { AnalysisState, Clock, LlmModels, LlmRepository, PipelineRegistry, SiteFetchRepository } from '../types/index.js'
+import { createCrawlStep } from './pipeline-steps/crawl-step.js'
+import { createProfileStep } from './pipeline-steps/profile-step.js'
 
-// Steps register here as they land: analysis (crawl, profile, competitors, segments) in #4 and #5,
-// lead_build (prospect, qualify, draft, charge) in #10 and #11. A run whose type has no pipeline
-// ends with `pipeline_unavailable` instead of hanging.
-export const PIPELINES: PipelineRegistry = {}
+export interface PipelineDeps {
+  siteFetch: SiteFetchRepository
+  llm: LlmRepository
+  models: LlmModels
+  clock: Clock
+}
+
+// competitors and segments join the analysis pipeline in #5; lead_build (prospect, qualify, draft, charge)
+// lands in #10 and #11. A run whose type has no pipeline ends with `pipeline_unavailable` instead of hanging.
+export function createPipelineRegistry(deps: PipelineDeps): PipelineRegistry {
+  return {
+    analysis: () => {
+      const state: AnalysisState = {}
+      return [createCrawlStep(deps, state), createProfileStep(deps, state)]
+    },
+  }
+}

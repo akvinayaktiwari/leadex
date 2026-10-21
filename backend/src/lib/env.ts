@@ -18,7 +18,11 @@ const runStoreEnvSchema = z.object({
   DYNAMODB_ENDPOINT: z.url().optional(),
 }) satisfies z.ZodType<RunStoreEnv>
 
-const workerEnvSchema = apiEnvSchema.extend(runStoreEnvSchema.shape) satisfies z.ZodType<WorkerEnv>
+const workerEnvSchema = apiEnvSchema.extend(runStoreEnvSchema.shape).extend({
+  ANTHROPIC_API_KEY: z.string().min(1),
+  LLM_MODEL_SMART: z.string().min(1),
+  LLM_MODEL_FAST: z.string().min(1),
+}) satisfies z.ZodType<WorkerEnv>
 
 let cachedApiEnv: ApiEnv | undefined
 
