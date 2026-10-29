@@ -11,6 +11,23 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:2.6.1
+        ports:
+          - 8000:8000
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8.33.6
+        ports:
+          - 8123:8123
+        env:
+          CLICKHOUSE_USER: leadex
+          CLICKHOUSE_PASSWORD: leadex
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+        options: >-
+          --ulimit nofile=262144:262144
+          --health-cmd "wget -qO- http://localhost:8123/ping || exit 1"
+          --health-interval 5s --health-timeout 3s --health-retries 20
     env:
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
@@ -23,6 +40,11 @@ jobs:
       - name: Typecheck (strict)
         run: npm run typecheck
       - name: Test (includes layering check, criterion 13)
+        env:
+          DYNAMODB_ENDPOINT: http://localhost:8000
+          CLICKHOUSE_URL: http://localhost:8123
+          CLICKHOUSE_USER: leadex
+          CLICKHOUSE_PASSWORD: leadex
         run: npm test
       - name: Build
         run: npm run build
@@ -32,4 +54,6 @@ jobs:
           STAGE: dev
           AWS_REGION: ap-south-1
           FRONTEND_URL: http://localhost:3000
+          LLM_MODEL_SMART: claude-opus-5-5
+          LLM_MODEL_FAST: claude-opus-5-5
         run: npx cdk synth --quiet

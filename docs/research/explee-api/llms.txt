@@ -1,0 +1,197 @@
+# Explee Public API
+
+> Explee is a B2B outreach + data platform. This API lets your agent run outreach campaigns end-to-end (read/answer the inbox, set budgets, start/stop, control auto-manage campaigns, pull analytics) and search/enrich company & people data — all with one `X-API-Key`. Point your agent at the OpenAPI schema below and it can call everything here directly.
+
+## Authentication
+
+- All requests need the header `X-API-Key: <your key>` (get one at https://explee.com/app-auto-gtm/api-keys).
+- Base URL: `https://api.explee.com`
+- Rate limit: 10000 requests/hour, 150 concurrent per organization.
+
+## Machine-readable schema (load this first)
+
+- [OpenAPI schema](https://api.explee.com/public/api/openapi.json): the full, always-current spec — every endpoint, parameter and response. Give this to your agent.
+- [Interactive docs](https://api.explee.com/public/api/docs): human-readable reference.
+
+## Tell us what you need
+
+- Missing a feature? Hit a problem? Send it in your own words: `POST /public/api/v1/feedback` with body `{"message": "..."}`. It goes straight to the Explee team — we read everything. Free of charge.
+
+## How outreach campaigns work (read this before calling)
+
+The structure, top down — everything is scoped to your API key's organization:
+
+- **Project** — one workspace per product/company you run outreach for, identified by its `domain`. Holds campaigns and a project-wide daily budget.
+- **Campaign** — a targeted audience segment inside a project (e.g. "US mid-market SaaS"). Has its own daily budget, a lead pool, a lifecycle `status`, and an inbox.
+- **Lead / inbox** — the people a campaign contacted and their replies. You answer per lead.
+
+Ids chain top-down: list projects → take a `project_id` → list its campaigns (`GET /public/api/v1/autogtm/campaigns?project_id=…`) → take a `campaign_id` → use it for that campaign's inbox, analytics, budget and start/stop.
+
+**Auto-manage campaigns** is Explee's own agent running campaigns and splitting the budget for you. (The path and the `autopilot_enabled` field keep their original name; the feature is called Auto-manage campaigns in the app.) While it's ON, starting campaigns and per-campaign budgets are agent-owned — calling `start` or setting a campaign budget returns `409` (stopping is always yours). Turn it off (`PATCH /public/api/v1/autogtm/projects/{id}/autopilot`) to control campaigns yourself.
+
+## Workflows (follow these)
+
+Every call: `-H "X-API-Key: <your key>"` against `https://api.explee.com`. All paths below are under `/public/api/v1`. Get `{project_id}` from step 1, `{campaign_id}` from step 1 too.
+
+**1 — Get your bearings (always start here).**
+- `GET /autogtm/projects` → your projects (`id`, `domain`).
+- `GET /autogtm/projects/{project_id}/analytics` → project totals + a per-campaign breakdown (each with `campaign_id`, `name`, `status`, `emails_sent`, `total_replies`, `reply_rate_pct`, `hot_leads`, `spend_usd`, `daily_budget_usd`).
+- Now you know every `campaign_id` and how each is doing. (For one campaign only: `GET /autogtm/campaigns/{campaign_id}/analytics?period=today|7d|30d|all`.)
+
+**1b — Audit and correct what a campaign targets and says.**
+- `GET /autogtm/campaigns/{campaign_id}` → the campaign's whole definition: `offer`, `customer_problem`, `target_role`, `target_geography`, `target_company_size`, `positive_criteria`, `negative_criteria`, `example_clients`, the derived `keywords`, the copy briefs (`instructions` for the first email, `followup_instructions` for every follow-up, `language`), the project-level `reply_instructions`, plus `schedule` (send days) and `followups` (sequence length and spacing). This is the app's **Campaign** tab — read it before trusting a campaign, especially one you did not create.
+- `PATCH /autogtm/campaigns/{campaign_id}` with only the fields you are changing, e.g. `{"target_role": "Head of Finance", "negative_criteria": ["freelancers", "single-person shops"]}`. An omitted field keeps its value; an empty string or list clears it. An unknown field name is a `422`, never a silent no-op — so a typo can't look like a successful write.
+- **Re-aiming costs leads**: every field Explee searches with re-aims the campaign — `name`, `offer`, `customer_problem`, `target_role`, `target_geography`, `target_company_size`, `positive_criteria`, `negative_criteria`, `example_clients`. A real change to any of them drops the leads this campaign has not contacted yet and makes Explee search again; sending a field's current value back is not a change. Only `language` and `schedule` re-aim nothing. Emails already sent are never affected, and contacts already in a sequence keep it.
+- **The new search is not instant**: on a running campaign it starts about 5 minutes after your *last* targeting change, and each further targeting change restarts that wait — send all your changes, then leave the campaign alone. Until then the campaign keeps its current `status` and lead pool; when the search starts, `status` turns `searching`. A stopped campaign applies the new targeting when you start it again; one not launched yet, at launch.
+- **A running campaign pauses for review**: when the new search finishes, a campaign that was sending moves to `review` (`status_reason` `re_search_from_outreach`) and sends nothing until its new lead list is approved — `POST /autogtm/campaigns/{campaign_id}/approve`. With Auto-manage campaigns ON it is also approved automatically at the end of the project's review window (12 hours by default); with it OFF only `approve` resumes sending.
+- `targeting_editable: false` means the campaign runs on a lead list you imported: that list IS its audience, so the two search fields — `target_geography` and `target_company_size` — are locked (`409`). `target_role`, `positive_criteria` and `negative_criteria` also shape the email copy, so they still save (`200`) and simply re-aim nothing; the offer and the briefs stay editable too.
+- `schedule` patches one level down and merges: `{"schedule": {"days": ["mon","wed","fri"]}}` (any case or order, canonicalized for you; an empty week is a `422` — a campaign that should send on no day is stopped, not emptied). `followups` is a project-level setting shared by every campaign of the project: echoing the current values back is accepted, different ones are a `422`.
+- The rule for this endpoint: **anything a person can edit on the campaign in the app, you can edit here**, minus what the app validates in a second step this endpoint cannot reproduce. Read-only: the copy briefs `instructions` / `followup_instructions` (readable, not writable — the app moderates a brief right after saving and shows the verdict; here there is no preview to show, and an unmoderated brief would only fail at send time), `target_url` and `reply_instructions` (their own two-step save), `keywords` (Explee derives it), the budget (step 4) and the status (step 2). You can still set the briefs when you import a lead list — `POST /autogtm/campaigns/import` takes `instructions`, `followup_instructions` and `language` (step 5b).
+
+**2 — Turn a campaign off / on.**
+- Off (stops sending, keeps watching for replies): `POST /autogtm/campaigns/{campaign_id}/stop` — always available.
+- On (resumes): `POST /autogtm/campaigns/{campaign_id}/start` — needs autopilot OFF (returns `409` while it's ON; `PATCH /autogtm/projects/{project_id}/autopilot` first).
+- Both are idempotent and return `{"accepted": true}`. `start` on a campaign whose project budget is `0` won't send until you raise the budget (step 4).
+
+**3 — Answer hot leads.**
+- `GET /autogtm/campaigns/{campaign_id}/inbox?tab=need_reply` → contacts awaiting a reply (`person_id`, `email`, `latest_intent` like `hot_lead`).
+- `GET /autogtm/campaigns/{campaign_id}/inbox/{person_id}` → the full thread + `can_reply` + the enriched `lead` profile. Each message lists its `cc` addresses and its `attachments` (`id`, `filename`, `content_type`, `size_bytes`, `is_inline`, `stored`).
+- `GET /autogtm/campaigns/{campaign_id}/inbox/{person_id}/attachments/{attachment_id}` → `{url, filename, content_type, expires_at}`: a signed link to the file, valid 5 minutes, fetched with a plain GET (no API key); `410` for a file listed with `stored: false`.
+- `POST /autogtm/campaigns/{campaign_id}/attachments` (multipart field `file`, ≤25 MB, PDF/PNG/JPEG/GIF/WebP/DOCX/PPTX/XLSX/TXT, moderated, 200 uploads/h per key) → `{id, …}`; pass ids in `attachment_ids` of `…/reply` (≤10 files; total must fit the mailbox — `413`). `…/reply` also takes `cc_emails` (≤20) and `reply_all` (default `true`).
+- `POST /autogtm/campaigns/{campaign_id}/inbox/{person_id}/reply` with body `{"body_text": "Happy to help — does Tuesday work?"}` → sends. Recipient, `Re:` subject and threading are filled in for you; optionally add `cc_emails`, `reply_all` and `attachment_ids`.
+
+**3b — Pull hot leads into your CRM (Zapier / Make / custom).**
+- `GET /autogtm/hot-leads` → every hot lead across your organization, newest first, as an enriched contact: `name`, `email`, `job_title`, `company_name`, `company_domain`, `linkedin_url`, `country`, `phone`, plus `why_hot` (their qualifying reply, verbatim), `replied_at` and `became_hot_at`. Poll with `since` = the newest `became_hot_at` you have seen; `project_id` limits the feed to one project.
+- Poll it with `?since=<your last poll time, ISO 8601>` to fetch only newly-hot leads; `?campaign_id=…` narrows to one campaign. Use each item's `campaign_id` + `person_id` with the step-3 endpoints to read or answer the conversation.
+
+**4 — Control the budget.**
+- Per-campaign (needs Auto-manage campaigns OFF first):
+  - `PATCH /autogtm/projects/{project_id}/autopilot` body `{"autopilot_enabled": false}`
+  - `PATCH /autogtm/campaigns/{campaign_id}/budget` body `{"daily_limit_usd": 30}` (USD/day, 1–300). The project total follows the sum of its campaigns.
+- Whole project (works in either mode): `PATCH /autogtm/projects/{project_id}/budget` body `{"daily_budget_usd": 100}` — `0` pauses all sending.
+
+**5 — Launch a new campaign (Explee finds the leads).**
+- `POST /autogtm/campaigns` body `{"project_id": 4021, "name": "Logistics SMBs in Germany"}` → `201` with the campaign's full definition (as in step 1b), `status: "discovery"`. Only `project_id` and `name` are required: Explee drafts the offer, customer problem, criteria, example clients and search keywords from the name and your project. Any field you send replaces the draft (`[]` means "none"): `offer`, `customer_problem`, `target_role`, `target_geography`, `target_company_size`, `positive_criteria`, `negative_criteria`, `example_clients`. The email briefs and `language` are not set here: the briefs are written in the app's email editor, `language` with `PATCH` (step 1b). Search `keywords` are always drafted from the name. Geography and company size default to the project's. Creating is free; 100 creates per hour per organization. Not idempotent: after a timeout, list the project's campaigns before retrying.
+- Check or correct it with `GET` / `PATCH /autogtm/campaigns/{campaign_id}` (step 1b) — nothing runs yet.
+- `POST /autogtm/campaigns/{campaign_id}/start` → Explee searches for leads. From `discovery` this works with Auto-manage campaigns on or off.
+- When the list is ready the status becomes `review`. `POST /autogtm/campaigns/{campaign_id}/approve` sends it. With Auto-manage campaigns ON it is also approved automatically at the end of the project's review window (12 hours by default); with it OFF only `approve` sends it. Then `outreach` — sending within the budgets. `…/stop` parks the campaign (`listening`) at any point; a later `start` resumes it, from a stopped review that means sending without a further approve.
+
+**5b — Create a campaign from your own lead list (import).**
+- `POST /autogtm/campaigns/import` body `{"project_id": 4021, "name": "Q3 SaaS list", "leads": [{"email": "jane@acme.com", "first_name": "Jane", "last_name": "Doe", "company_domain": "acme.com", "job_title": "CTO", "linkedin_url": "https://linkedin.com/in/janedoe"}, …]}` → `{"task_id": "…"}`. Up to 30,000 leads; each import creates a NEW campaign (no adding into an existing one). The import is free.
+- Poll `GET /autogtm/campaigns/import/{task_id}` every few seconds until `status` is `completed` (`progress` shows the stage while `pending`). `result.campaign_id` is your new campaign — it now shows in the campaigns list and its leads start sending within the project budget, like any other campaign.
+- Per lead, mandatory: `email`, `first_name`, `last_name`, `company_domain`, `job_title`; `linkedin_url` is optional but strongly recommended (it enriches the lead from Explee's contact base for a better email). A lead missing a mandatory field is skipped and reported in `result.skipped` — never a request-level error. Duplicates of leads already contacted in the project and do-not-contact entries are dropped (`result.deduped`).
+- Brief the copy in the same call with the optional `instructions` (first email), `followup_instructions` (every follow-up) and `language` — e.g. `"instructions": "Pitch our SOC2 automation. Lead with their recent funding, ask for a 15-min call."` Each brief is plain language, up to 3,000 characters, and matches what you would type in the app's email editor. Omit them and the campaign is briefed from your project description alone. The copy itself is still written per lead; there is no way to send a fixed body.
+- `language` takes a short code — `de`, `fr`, `es`, `pt`, `ja`, … — with `en-US` / `en-GB` the only two-part ones; `auto` (the default) picks per lead. An unknown code is a `422` with the full list, never a silent fallback: see the field description in the schema for the exact set.
+
+**6 — Keep your CRM's customers and live deals out of the outreach (suppress list).**
+- The suppress list is organization-wide: it applies to **every** campaign, running or not — and it stops sequences that are already in flight, not just future sends: every email is checked against the list right before it goes out and cancelled if it matches. (This is the same list as the **Suppress list** page in the app; entries you push here show up there.)
+- Matching is exact. A person is matched on their email address (`jane+crm@acme.com` and `jane@acme.com` are two entries), a company on its domain — `acme.com` does not cover `eu.acme.com`, so list every domain you use.
+- `POST /autogtm/suppress-list/people` body `{"list": "crm-sync", "people": [{"email": "jane@acme.com"}, …]}` → `{"list": "crm-sync", "added": 12, "skipped": 0}`. Outreach stops on the email; the name and `linkedin_url` fields are stored but not actively used today — they are there for the day outreach runs somewhere other than email (LinkedIn and the like).
+- `POST /autogtm/suppress-list/companies` body `{"list": "crm-customers", "domains": ["acme.com", …]}` — nobody at these companies is contacted (matched on the lead's company domain or the domain of its email address).
+- One call = one list, exactly like uploading one CSV: a `list` name that is already taken comes back with a `(2)` suffix instead of merging, and lists are independent (a person on two lists stays suppressed until both are gone). Re-syncing from your CRM therefore adds a new list — delete the previous one when you no longer want it.
+- `GET /autogtm/suppress-list/people` (and `/companies`) → your lists; `GET /autogtm/suppress-list/people/{list}?limit=&offset=` → what's in one; `DELETE /autogtm/suppress-list/people/{list}` → remove a whole list, like deleting it in the app.
+- Note: `/dedup/people` and `/dedup/companies` are a different thing — they only exclude results from **search**, they do not touch campaigns.
+
+## Campaign statuses (what you'll see in `status`)
+- `discovery` / `review` — still finding and vetting leads; not sending yet. A `review` list goes out with `…/approve` (or automatically at the end of the review window while Auto-manage campaigns is ON).
+- `outreach` — actively sending. Only outreach campaigns spend budget, so per-campaign budget edits apply only here.
+- `listening` — not sending, watching for replies. `status_reason` tells you why: `user_pause` (you stopped it — `start` resumes), `budget_pause` (project budget is `0` — raise it), `lead_pool_exhausted` / `sending_completed` (ran out — needs new leads), `billing_pause` (top up).
+- `error` — needs attention in the app.
+
+## Good to know
+- You reply to a **lead**, not an email address — the API resolves the recipient, subject and threading; you send the text plus, optionally, Cc and files. You can reply only to a contact who has replied and isn't `unsubscribe`, and at most 3 replies per message they sent.
+- A contact's email is hidden until they reply (`person_id` is the stable handle).
+- An imported campaign contains exactly the leads you sent — Explee's agent never adds or replaces leads in it. Emails are verified at send time (Explee's cost); sending is billed as usual.
+- A miss on any id returns `404` (never reveals whether it exists in another account).
+
+## Outreach
+
+Manage your Explee outreach campaigns programmatically with the same `X-API-Key`: list campaigns, read and answer the inbox, set the project budget, start/stop campaigns, and pull per-campaign analytics — everything you need to build your own autopilot on top.
+
+- `GET /public/api/v1/autogtm/billing` — Outreach balance
+- `GET /public/api/v1/autogtm/billing/activity` — Credits activity
+- `GET /public/api/v1/autogtm/billing/usage` — Outreach spend by day
+- `GET /public/api/v1/autogtm/campaigns` — List outreach campaigns
+- `POST /public/api/v1/autogtm/campaigns` — Create campaign
+- `POST /public/api/v1/autogtm/campaigns/import` — Create a campaign from your own leads (import)
+- `GET /public/api/v1/autogtm/campaigns/import/{task_id}` — Campaign import status/result
+- `GET /public/api/v1/autogtm/campaigns/{campaign_id}` — Get campaign definition
+- `PATCH /public/api/v1/autogtm/campaigns/{campaign_id}` — Update campaign definition
+- `GET /public/api/v1/autogtm/campaigns/{campaign_id}/analytics` — Campaign analytics
+- `POST /public/api/v1/autogtm/campaigns/{campaign_id}/approve` — Approve campaign lead list
+- `POST /public/api/v1/autogtm/campaigns/{campaign_id}/attachments` — Upload an attachment
+- `PATCH /public/api/v1/autogtm/campaigns/{campaign_id}/budget` — Set campaign daily budget
+- `GET /public/api/v1/autogtm/campaigns/{campaign_id}/inbox` — List inbox conversations
+- `GET /public/api/v1/autogtm/campaigns/{campaign_id}/inbox/{person_id}` — Read a conversation thread
+- `GET /public/api/v1/autogtm/campaigns/{campaign_id}/inbox/{person_id}/attachments/{attachment_id}` — Download an attachment
+- `GET /public/api/v1/autogtm/campaigns/{campaign_id}/inbox/{person_id}/note` — Read the lead note
+- `POST /public/api/v1/autogtm/campaigns/{campaign_id}/inbox/{person_id}/note` — Set the lead note
+- `POST /public/api/v1/autogtm/campaigns/{campaign_id}/inbox/{person_id}/reply` — Reply in a thread
+- `GET /public/api/v1/autogtm/campaigns/{campaign_id}/leads` — List contacted leads
+- `POST /public/api/v1/autogtm/campaigns/{campaign_id}/start` — Start campaign
+- `GET /public/api/v1/autogtm/campaigns/{campaign_id}/status` — Campaign send state
+- `POST /public/api/v1/autogtm/campaigns/{campaign_id}/stop` — Stop campaign
+- `GET /public/api/v1/autogtm/hot-leads` — List hot leads
+- `GET /public/api/v1/autogtm/projects` — List outreach projects
+- `GET /public/api/v1/autogtm/projects/{project_id}` — Get one outreach project
+- `GET /public/api/v1/autogtm/projects/{project_id}/analytics` — Project analytics
+- `GET /public/api/v1/autogtm/projects/{project_id}/autopilot` — Get autopilot settings
+- `PATCH /public/api/v1/autogtm/projects/{project_id}/autopilot` — Set autopilot settings
+- `GET /public/api/v1/autogtm/projects/{project_id}/budget` — Get project daily budget
+- `PATCH /public/api/v1/autogtm/projects/{project_id}/budget` — Set project daily budget
+- `GET /public/api/v1/autogtm/suppress-list/companies` — Company suppress lists
+- `POST /public/api/v1/autogtm/suppress-list/companies` — Suppress companies
+- `GET /public/api/v1/autogtm/suppress-list/companies/{list_name}` — Read a company list
+- `DELETE /public/api/v1/autogtm/suppress-list/companies/{list_name}` — Delete a company list
+- `GET /public/api/v1/autogtm/suppress-list/people` — People suppress lists
+- `POST /public/api/v1/autogtm/suppress-list/people` — Suppress people
+- `GET /public/api/v1/autogtm/suppress-list/people/{list_name}` — Read a people list
+- `DELETE /public/api/v1/autogtm/suppress-list/people/{list_name}` — Delete a people list
+- `POST /public/api/v1/autogtm/webhooks` — Add a webhook
+- `GET /public/api/v1/autogtm/webhooks` — List webhooks
+- `GET /public/api/v1/autogtm/webhooks/{webhook_id}` — Get a webhook
+- `DELETE /public/api/v1/autogtm/webhooks/{webhook_id}` — Delete a webhook
+
+## Search
+
+- `POST /public/api/v1/search/companies` — Companies
+- `POST /public/api/v1/search/companies-by-domains` — Companies by Domains
+- `POST /public/api/v1/search/nl-to-filters` — NL to Filters
+- `POST /public/api/v1/search/people` — People
+- `POST /public/api/v1/search/people-by-domains` — People by Domains
+
+## Contact
+
+- `POST /public/api/v1/enrich/email` — Find email by name
+- `POST /public/api/v1/enrich/email/batch` — Find email by name (batch request)
+- `GET /public/api/v1/enrich/email/batch/{task_id}` — Find email by name (batch results)
+- `POST /public/api/v1/enrich/phone` — Find phone by LinkedIn URL
+- `POST /public/api/v1/find-and-enrich` — Find people and enrich their emails (async)
+- `GET /public/api/v1/find-and-enrich/{task_id}` — Find-and-enrich job status and results
+
+## Tasks
+
+- `GET /public/api/v1/tasks` — List async tasks
+
+## Billing
+
+Check how many credits your organization has left, so your agent can see when it is running low. Credits are priced at 1 credit = $0.01; add more on your billing page at https://explee.com/app-auto-gtm/billing.
+
+- `GET /public/api/v1/billing/balance` — Get balance
+
+## Feedback
+
+Send us freeform feedback — feature requests, problem reports, missing data, anything. It goes straight to the team; we read everything. Free of charge.
+
+- `POST /public/api/v1/feedback` — Send feedback
+
+## Deduplication
+
+- `GET /public/api/v1/dedup/companies` — Companies Lists
+- `POST /public/api/v1/dedup/companies` — Create Companies List
+- `GET /public/api/v1/dedup/companies/{list_id}` — Get Companies List
+- `DELETE /public/api/v1/dedup/companies/{list_id}` — Delete Companies List
+- `GET /public/api/v1/dedup/people` — People Lists
+- `POST /public/api/v1/dedup/people` — Create People List
+- `GET /public/api/v1/dedup/people/{list_id}` — Get People List
+- `DELETE /public/api/v1/dedup/people/{list_id}` — Delete People List

@@ -4,10 +4,12 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb'
 import * as ec2 from 'aws-cdk-lib/aws-ec2'
 import * as ecs from 'aws-cdk-lib/aws-ecs'
 import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns'
+import * as appscaling from 'aws-cdk-lib/aws-applicationautoscaling'
 import type * as iam from 'aws-cdk-lib/aws-iam'
 import * as kms from 'aws-cdk-lib/aws-kms'
 import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs'
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager'
 import * as sqs from 'aws-cdk-lib/aws-sqs'
 import type { Construct } from 'constructs'
 
@@ -17,7 +19,19 @@ export interface LeadexStackProps extends StackProps {
   stage: Stage
   frontendUrl: string
   pipelineVersion: string
+  llmModels: { smart: string; fast: string }
   sentryDsn?: string
+  // Turns on the daily Leadex Data import schedule. Off by default; sources land in #22/#23.
+  ingestEnabled?: boolean
+}
+
+// ClickHouse Cloud is managed outside CDK; its connection details live in the stage's app secret.
+const CLICKHOUSE_SECRET_KEYS = ['CLICKHOUSE_URL', 'CLICKHOUSE_USER', 'CLICKHOUSE_PASSWORD'] as const
+
+interface WorkerShared {
+  vpc: ec2.Vpc
+  image: ecs.ContainerImage
+  appSecret: secretsmanager.ISecret
 }
 
 interface TableSpec {
@@ -54,7 +68,9 @@ export class LeadexStack extends Stack {
     const queue = this.createQueues(key)
     const environment = this.sharedEnvironment(props, tables, queue, key)
     const { api, stream } = this.createFunctions(environment, tables, queue, key)
-    this.createWorker(environment, tables, queue, key)
+    const shared = this.createWorkerShared(props.stage)
+    this.createWorker({ ...environment, LLM_MODEL_SMART: props.llmModels.smart, LLM_MODEL_FAST: props.llmModels.fast }, tables, queue, key, shared)
+    this.createIngestTask(props, shared)
     new CfnOutput(this, 'ApiUrl', { value: api.url })
     new CfnOutput(this, 'StreamUrl', { value: stream.url })
     new CfnOutput(this, 'RunsQueueUrl', { value: queue.queueUrl })
@@ -149,22 +165,31 @@ export class LeadexStack extends Stack {
     return { api, stream }
   }
 
-  private createWorker(
-    environment: Record<string, string>,
-    tables: Map<string, dynamodb.Table>,
-    queue: sqs.Queue,
-    key: kms.Key,
-  ): void {
+  private createWorkerShared(stage: Stage): WorkerShared {
+    // Created once per stage outside CDK (see README) so keys never appear in a template or in git.
+    const appSecret = secretsmanager.Secret.fromSecretNameV2(this, 'AppSecret', `leadex/${stage}/app`)
     // Public subnets with no NAT gateway keep idle cost near zero; tasks get public IPs for egress.
     const vpc = new ec2.Vpc(this, 'WorkerVpc', {
       maxAzs: 2,
       natGateways: 0,
       subnetConfiguration: [{ name: 'public', subnetType: ec2.SubnetType.PUBLIC }],
     })
+    // One image for the queue worker (default CMD) and the ingest task (CMD overridden below).
+    const image = ecs.ContainerImage.fromAsset(REPO_ROOT, { file: 'backend/Dockerfile.worker' })
+    return { vpc, image, appSecret }
+  }
+
+  private createWorker(
+    environment: Record<string, string>,
+    tables: Map<string, dynamodb.Table>,
+    queue: sqs.Queue,
+    key: kms.Key,
+    shared: WorkerShared,
+  ): void {
     const service = new ecsPatterns.QueueProcessingFargateService(this, 'Worker', {
-      vpc,
+      vpc: shared.vpc,
       queue,
-      image: ecs.ContainerImage.fromAsset(REPO_ROOT, { file: 'backend/Dockerfile.worker' }),
+      image: shared.image,
       cpu: 512,
       memoryLimitMiB: 1024,
       minScalingCapacity: 0,
@@ -172,10 +197,41 @@ export class LeadexStack extends Stack {
       assignPublicIp: true,
       taskSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64, operatingSystemFamily: ecs.OperatingSystemFamily.LINUX },
-      environment,
+      // Lambda sets (and reserves) AWS_REGION itself; the Fargate container needs it passed in.
+      environment: { ...environment, AWS_REGION: this.region },
+      secrets: { ANTHROPIC_API_KEY: ecs.Secret.fromSecretsManager(shared.appSecret, 'ANTHROPIC_API_KEY') },
       circuitBreaker: { rollback: true },
       minHealthyPercent: 100,
     })
     this.grantData(service.taskDefinition.taskRole, tables, key)
+  }
+
+  // Daily Leadex Data imports (registries, open data). Runs once per schedule and exits.
+  private createIngestTask(props: LeadexStackProps, shared: WorkerShared): void {
+    const ingestEnabled = props.ingestEnabled ?? false
+    const secrets = Object.fromEntries(
+      CLICKHOUSE_SECRET_KEYS.map((name) => [name, ecs.Secret.fromSecretsManager(shared.appSecret, name)]),
+    )
+    const cluster = new ecs.Cluster(this, 'IngestCluster', { vpc: shared.vpc })
+    new ecsPatterns.ScheduledFargateTask(this, 'Ingest', {
+      cluster,
+      schedule: appscaling.Schedule.cron({ minute: '30', hour: '21' }), // 21:30 UTC = 03:00 IST, low traffic
+      enabled: ingestEnabled,
+      subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
+      platformVersion: ecs.FargatePlatformVersion.LATEST,
+      scheduledFargateTaskImageOptions: {
+        image: shared.image,
+        command: ['node', 'ingest.mjs'],
+        cpu: 512,
+        memoryLimitMiB: 2048,
+        environment: {
+          STAGE: props.stage,
+          INGEST_ENABLED: String(ingestEnabled),
+          CLICKHOUSE_DATABASE: `leadex_${props.stage}`,
+          ...(props.sentryDsn ? { SENTRY_DSN: props.sentryDsn } : {}),
+        },
+        secrets,
+      },
+    })
   }
 }
