@@ -198,7 +198,14 @@ export interface ApiServices {
   runStream: RunStreamService
 }
 
-export type SentryRuntime = 'api' | 'stream' | 'worker'
+export type SentryRuntime = 'api' | 'stream' | 'worker' | 'ingest'
+
+// What Sentry setup reads; ApiEnv and IngestEnv both satisfy it.
+export interface SentryEnv {
+  STAGE: Stage
+  SENTRY_DSN?: string | undefined
+  PIPELINE_VERSION?: string | undefined
+}
 
 export type LogFields = Record<string, string | number | boolean | null>
 
@@ -299,4 +306,211 @@ export interface LlmRepository {
 export interface LlmModels {
   smart: string
   fast: string
+}
+
+// ---- Leadex Data (own lead database, ClickHouse) ----
+
+export interface LeadDataEnv {
+  CLICKHOUSE_URL: string
+  CLICKHOUSE_USER: string
+  CLICKHOUSE_PASSWORD: string
+  CLICKHOUSE_DATABASE: string
+}
+
+export interface IngestEnv extends LeadDataEnv {
+  STAGE: Stage
+  INGEST_ENABLED: boolean
+  SENTRY_DSN?: string | undefined
+}
+
+export type EntityType = 'company' | 'person'
+
+export type FactSource =
+  | 'website'
+  | 'web_search'
+  | 'gleif'
+  | 'sec_edgar'
+  | 'india_company_master'
+  | 'mca_director'
+  | 'us_state_registry'
+  | 'web_data_commons'
+  | 'pdl'
+
+export type FactMethod = 'registry' | 'structured_data' | 'page_extract' | 'vendor'
+
+// How far we may keep and reuse a fact: our own extraction, an open-data licence,
+// an official public record, or a vendor's licence terms.
+export type LicenceScope = 'owned' | 'open_data' | 'public_record' | 'vendor_licensed'
+
+export type EmployeeBand = '1-10' | '11-50' | '51-200' | '201-500' | '501-1000' | '1001-5000' | '5001+'
+
+export interface CompanyRecord {
+  companyId: string
+  domain: string
+  name: string
+  legalName?: string | undefined
+  lei?: string | undefined
+  description?: string | undefined
+  industry?: string | undefined
+  keywords: string[]
+  employeeBand?: EmployeeBand | undefined
+  // ISO-3166 alpha-2. Required: a record we cannot place in a country is never stored.
+  country: string
+  region?: string | undefined
+  city?: string | undefined
+  technologies: string[]
+  servedMarkets: string[]
+  updatedAt: string
+}
+
+export interface PersonRecord {
+  personKey: string
+  domain: string
+  firstName: string
+  lastName: string
+  title: string
+  seniority?: string | undefined
+  department?: string | undefined
+  country: string
+  isOfficer: boolean
+  updatedAt: string
+}
+
+// The record fields a fact can back. Ids and timestamps are derived, not claimed by a source.
+export type CompanyField = Exclude<keyof CompanyRecord, 'companyId' | 'updatedAt'>
+export type PersonField = Exclude<keyof PersonRecord, 'personKey' | 'updatedAt'>
+
+export interface FactInput<F extends string = string> {
+  field: F
+  value: string
+  source: FactSource
+  sourceUrl: string
+  method: FactMethod
+  licenceScope: LicenceScope
+  retrievedAt: string
+}
+
+export interface Fact extends FactInput {
+  entityType: EntityType
+  entityId: string
+}
+
+export type CompanyDraft = Omit<CompanyRecord, 'companyId' | 'updatedAt'>
+export type PersonDraft = Omit<PersonRecord, 'personKey' | 'updatedAt'>
+
+export interface CompanyWrite {
+  company: CompanyDraft
+  facts: FactInput<CompanyField>[]
+}
+
+export interface PersonWrite {
+  person: PersonDraft
+  facts: FactInput<PersonField>[]
+}
+
+export type WriteOutcome =
+  | { status: 'saved'; entityId: string }
+  | { status: 'suppressed'; entityId: string }
+
+export type SuppressionKind = 'person' | 'email' | 'domain'
+
+export type SuppressionReason = 'removal_request' | 'opt_out' | 'manual'
+
+export interface SuppressionEntry {
+  kind: SuppressionKind
+  valueHash: string
+  reason: SuppressionReason
+  createdAt: string
+}
+
+export interface CompanySearchQuery {
+  countries: string[]
+  // Always applied by the repository, so a caller can never forget it.
+  excludedCountries: string[]
+  industries: string[]
+  employeeBands: EmployeeBand[]
+  // Lowercase; a company matches if it has any of them.
+  keywords: string[]
+  technologies: string[]
+  limit: number
+}
+
+export interface PeopleSearchQuery {
+  domains: string[]
+  excludedCountries: string[]
+  // Case-insensitive substrings of the title; empty means any title.
+  titleTerms: string[]
+  limit: number
+}
+
+export interface CompanyFilters {
+  industries: string[]
+  employeeMin: number
+  employeeMax: number
+  countries: string[]
+  keywords: string[]
+  technologies: string[]
+}
+
+export interface LeadDataRepository {
+  insertCompanies(companies: CompanyRecord[]): Promise<void>
+  insertPeople(people: PersonRecord[]): Promise<void>
+  insertFacts(facts: Fact[]): Promise<void>
+  searchCompanies(query: CompanySearchQuery): Promise<CompanyRecord[]>
+  searchPeople(query: PeopleSearchQuery): Promise<PersonRecord[]>
+  listFacts(entityType: EntityType, entityIds: string[]): Promise<Fact[]>
+  insertSuppression(entries: SuppressionEntry[]): Promise<void>
+  // Returns the subset of the given hashes that are suppressed.
+  findSuppressed(kind: SuppressionKind, valueHashes: string[]): Promise<Set<string>>
+}
+
+export interface LeadDataSchemaRepository {
+  ensureDatabase(): Promise<void>
+  appliedMigrations(): Promise<Set<string>>
+  applyMigration(name: string, statements: string[], appliedAt: string): Promise<void>
+}
+
+export interface MigrationFile {
+  name: string
+  sql: string
+}
+
+export interface DeliverableCompany {
+  company: CompanyRecord
+  facts: Fact[]
+}
+
+export interface DeliverablePerson {
+  person: PersonRecord
+  facts: Fact[]
+}
+
+export interface LeadDataService {
+  saveCompany(write: CompanyWrite): Promise<WriteOutcome>
+  savePerson(write: PersonWrite): Promise<WriteOutcome>
+  findCompanies(filters: CompanyFilters, limit: number): Promise<CompanyRecord[]>
+  findPeople(domains: string[], titleTerms: string[], limit: number): Promise<PersonRecord[]>
+  // For delivery: every populated field must be backed by a fact, or this throws LeadDataRuleError (missing_provenance).
+  loadDeliverableCompanies(companies: CompanyRecord[]): Promise<DeliverableCompany[]>
+  loadDeliverablePeople(people: PersonRecord[]): Promise<DeliverablePerson[]>
+  suppress(kind: SuppressionKind, value: string, reason: SuppressionReason): Promise<void>
+}
+
+export interface IngestJobResult {
+  written: number
+  skipped: number
+}
+
+export interface IngestJob {
+  name: string
+  run(): Promise<IngestJobResult>
+}
+
+export type IngestJobOutcome =
+  | { name: string; ok: true; result: IngestJobResult; durationMs: number }
+  | { name: string; ok: false; error: string; durationMs: number }
+
+export interface IngestSummary {
+  enabled: boolean
+  outcomes: IngestJobOutcome[]
 }

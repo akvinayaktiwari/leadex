@@ -16,3 +16,14 @@ export class EventWriteError extends Error {
     this.name = 'EventWriteError'
   }
 }
+
+// A Leadex Data write or delivery broke a data rule: missing provenance, or a blocked/unknown country.
+export class LeadDataRuleError extends Error {
+  constructor(
+    readonly code: 'missing_provenance' | 'blocked_country' | 'invalid_record',
+    message: string,
+  ) {
+    super(message)
+    this.name = 'LeadDataRuleError'
+  }
+}

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ApiEnv, RunStoreEnv, WorkerEnv } from '../types/index.js'
+import type { ApiEnv, IngestEnv, LeadDataEnv, RunStoreEnv, WorkerEnv } from '../types/index.js'
 
 const apiEnvSchema = z.object({
   STAGE: z.enum(['dev', 'staging', 'prod']),
@@ -24,6 +24,20 @@ const workerEnvSchema = apiEnvSchema.extend(runStoreEnvSchema.shape).extend({
   LLM_MODEL_FAST: z.string().min(1),
 }) satisfies z.ZodType<WorkerEnv>
 
+const leadDataEnvSchema = z.object({
+  CLICKHOUSE_URL: z.url(),
+  CLICKHOUSE_USER: z.string().min(1),
+  CLICKHOUSE_PASSWORD: z.string().min(1),
+  CLICKHOUSE_DATABASE: z.string().regex(/^[a-z][a-z0-9_]*$/, 'lowercase letters, digits and underscores'),
+}) satisfies z.ZodType<LeadDataEnv>
+
+const ingestEnvSchema = leadDataEnvSchema.extend({
+  STAGE: z.enum(['dev', 'staging', 'prod']),
+  // Off unless explicitly 'true', so a missing variable never starts imports.
+  INGEST_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  SENTRY_DSN: z.string().optional(),
+}) satisfies z.ZodType<IngestEnv, Record<string, unknown>>
+
 let cachedApiEnv: ApiEnv | undefined
 
 function parseEnv<T>(schema: z.ZodType<T>, source: NodeJS.ProcessEnv): T {
@@ -46,6 +60,14 @@ export function getRunStoreEnv(source: NodeJS.ProcessEnv = process.env): RunStor
 
 export function getWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEnv {
   return parseEnv(workerEnvSchema, source)
+}
+
+export function getLeadDataEnv(source: NodeJS.ProcessEnv = process.env): LeadDataEnv {
+  return parseEnv(leadDataEnvSchema, source)
+}
+
+export function getIngestEnv(source: NodeJS.ProcessEnv = process.env): IngestEnv {
+  return parseEnv(ingestEnvSchema, source)
 }
 
 export function resetEnvCacheForTests(): void {

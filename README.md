@@ -46,10 +46,26 @@ npx cdk synth
 npx cdk deploy
 ```
 
-Before the first deploy of a stage, create its app secret once (the worker reads `ANTHROPIC_API_KEY` from it):
+Before the first deploy of a stage, create its app secret once. The worker reads `ANTHROPIC_API_KEY` from it; the ingest task reads the ClickHouse connection:
 
 ```bash
-aws secretsmanager create-secret --name leadex/dev/app --secret-string '{"ANTHROPIC_API_KEY":"<key>"}'
+aws secretsmanager create-secret --name leadex/dev/app --secret-string \
+  '{"ANTHROPIC_API_KEY":"<key>","CLICKHOUSE_URL":"https://<host>:8443","CLICKHOUSE_USER":"<user>","CLICKHOUSE_PASSWORD":"<password>"}'
 ```
+
+If the secret already exists, add the three `CLICKHOUSE_*` keys with `aws secretsmanager put-secret-value` (it replaces the whole JSON, so include `ANTHROPIC_API_KEY` too).
+
+### Leadex Data (ClickHouse)
+
+Leadex's own lead database runs on ClickHouse Cloud, created by hand (not in CDK). The database name is `leadex_<stage>`. Apply the schema in `infra/clickhouse/` before the first deploy and after adding a migration:
+
+```bash
+CLICKHOUSE_URL=... CLICKHOUSE_USER=... CLICKHOUSE_PASSWORD=... CLICKHOUSE_DATABASE=leadex_dev \
+  npm run migrate:clickhouse --workspace backend
+```
+
+The daily import task (`leadex-ingest`, 03:00 IST) is deployed with its schedule disabled. Deploy with `INGEST_ENABLED=true` to turn it on once sources exist (#22, #23).
+
+Local development and tests use a ClickHouse container (see `backend/.env.example`); the ClickHouse tests run when `CLICKHOUSE_URL` is set and are required in CI.
 
 All configuration comes from environment variables; see `backend/.env.example` and `frontend/.env.example`.

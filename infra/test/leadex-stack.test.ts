@@ -18,6 +18,20 @@ beforeAll(() => {
   template = Template.fromStack(stack)
 })
 
+interface ContainerDefinition {
+  Command?: string[]
+  Environment: { Name: string; Value: unknown }[]
+  Secrets?: { Name: string }[]
+}
+
+function ingestContainer(source: Template = template): ContainerDefinition {
+  const containers = Object.values(source.findResources('AWS::ECS::TaskDefinition'))
+    .flatMap((resource) => resource.Properties.ContainerDefinitions as ContainerDefinition[])
+  const ingest = containers.find((container) => container.Command?.includes('ingest.mjs'))
+  if (!ingest) throw new Error('no ingest container in template')
+  return ingest
+}
+
 describe('LeadexStack', () => {
   // protects=all 8 app tables exist, on-demand, with the spec's keys and TTLs;
   // fails_when=a table is missing or a key/TTL drifts from the spec;
@@ -96,5 +110,48 @@ describe('LeadexStack', () => {
     const containers = Object.values(template.findResources('AWS::ECS::TaskDefinition')).flatMap((resource) => resource.Properties.ContainerDefinitions as { Environment: { Name: string }[]; Secrets?: { Name: string }[] }[])
     expect(containers.flatMap((container) => container.Environment.map((entry) => entry.Name))).not.toContain('ANTHROPIC_API_KEY')
     expect(containers.flatMap((container) => (container.Secrets ?? []).map((entry) => entry.Name))).toContain('ANTHROPIC_API_KEY')
+  })
+
+  // protects=the daily ingest schedule exists but is disabled unless ingestEnabled is set, and runs ingest.mjs on the worker image;
+  // fails_when=imports start on first deploy before any source is reviewed, or the task runs the queue worker instead;
+  // no_claim=does not run the task or check that ClickHouse is reachable.
+  it('schedules the ingest task, disabled by default', () => {
+    template.hasResourceProperties('AWS::Events::Rule', {
+      State: 'DISABLED',
+      ScheduleExpression: 'cron(30 21 * * ? *)',
+      Targets: [Match.objectLike({ EcsParameters: Match.objectLike({ NetworkConfiguration: { AwsVpcConfiguration: Match.objectLike({ AssignPublicIp: 'ENABLED' }) } }) })],
+    })
+    const ingest = ingestContainer()
+    expect(ingest.Command).toEqual(['node', 'ingest.mjs'])
+    expect(new Map(ingest.Environment.map((entry) => [entry.Name, entry.Value]))).toEqual(new Map([
+      ['STAGE', 'dev'], ['INGEST_ENABLED', 'false'], ['CLICKHOUSE_DATABASE', 'leadex_dev'],
+    ]))
+  })
+
+  // protects=ClickHouse credentials reach the ingest task only as Secrets Manager secrets;
+  // fails_when=CLICKHOUSE_URL/USER/PASSWORD appear as plain env (and so in the template) or are not wired;
+  // no_claim=does not check the secret contains these keys (added by hand, see README).
+  it('injects ClickHouse credentials as secrets', () => {
+    const ingest = ingestContainer()
+    const plain = ingest.Environment.map((entry) => entry.Name)
+    for (const name of ['CLICKHOUSE_URL', 'CLICKHOUSE_USER', 'CLICKHOUSE_PASSWORD']) {
+      expect(plain).not.toContain(name)
+      expect((ingest.Secrets ?? []).map((entry) => entry.Name)).toContain(name)
+    }
+  })
+
+  // protects=turning ingest on flips both the schedule and the container flag together;
+  // fails_when=the rule is enabled but the container still says false (silent no-op), or the reverse;
+  // no_claim=n/a.
+  it('enables schedule and flag together', () => {
+    const app = new App({ context: { 'aws:cdk:bundling-stacks': [] } })
+    const stack = new LeadexStack(app, 'Leadex-ingest-on', {
+      stage: 'dev', frontendUrl: 'http://localhost:3000', pipelineVersion: '1',
+      llmModels: { smart: 'claude-opus-5-5', fast: 'claude-opus-5-5' }, ingestEnabled: true,
+      env: { account: '111111111111', region: 'ap-south-1' },
+    })
+    const enabled = Template.fromStack(stack)
+    enabled.hasResourceProperties('AWS::Events::Rule', { State: 'ENABLED' })
+    expect(ingestContainer(enabled).Environment.find((entry) => entry.Name === 'INGEST_ENABLED')?.Value).toBe('true')
   })
 })

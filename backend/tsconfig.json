@@ -4,5 +4,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["index.ts", "stream.ts", "worker.ts", "src/**/*.ts", "tools/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": ["index.ts", "stream.ts", "worker.ts", "ingest.ts", "src/**/*.ts", "tools/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
 }
