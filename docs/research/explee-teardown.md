@@ -148,6 +148,82 @@ Review UI: "Found N unique leads. Review and approve to start outreach. Auto-app
 - Data bug: in `dashboard.last_replies[]`, `company_name` holds the lead's email address. The real company is in `company_display`.
 - `dashboard` also returns `setup_steps` (project_docs, geography, booking_link, follow_ups, reply_copies) with `done` flags. This is their post-launch checklist nudging users to add docs and reply copy.
 
+### 6e. Day 4: replies and threads (checked 2026-10-23 ~12:25 UTC)
+
+- **Totals:** 360 emails, all first touch, 0 follow-ups. 3 human replies (0.8%), 1 hot lead, 2 bounces (one each on 10-22 and 10-23), 0 auto-replies. Daily volume 13 / 125 / 115 / 107 (10-20 to 10-23). Spend $14.40, balance $15.56; at about $4.30-5/day the free credit runs out around 10-26, then auto-recharge charges the card (`monthly_cap_usd` still null).
+- **Daily budget is split per campaign:** `daily_budget_usd` per segment is 3 / 2 / 2 (+ Brokerage), within the $10 project budget and `campaign_floor_usd: 4`. Actual spend (~$4.50/day) is well under $10. *Inferred:* the per-campaign split, not the project budget, limits volume.
+- **No follow-ups yet, as expected:** `delay_days: 3`; the first sends (10-20 ~14:30 UTC) became due after India's 7 PM IST cutoff on 10-23, and Saturday is not a sending day. *Prediction:* the first follow-ups go out Sunday 10-25 from 8 AM IST.
+- **Thread endpoint:** `GET /segments/{id}/outreach/thread/{personId}` → `{thread:[…]}`. Per message: `msg_type (sent|reply), subject, body_text, body_html, from_email, to_email, cc, message_id, in_reply_to, references, ts, intent, mailbox_id, from_display_name, wire_from_name, from_name_rotated, mailbox_status, rerouted_from, manual_reply, dkim_result, dkim_signed_by, dkim_checked_at, has_signed_eml, attachments, send_status, failure_reason`. Opening a thread also calls `inbox/contact?person=`, `inbox/lead/{personId}?why_fits=` (person + company card and a one-line "why it fits"), `segments/{id}/leads/{personId}/status`, `outreach/materials?project_id=` (attachments library, empty) and `outreach/auto-reply/{personId}` (not GET; probably POST to generate or schedule).
+- **Mailbox vendors are visible in `mailbox_id`:** `icemail:v@gofreshanchor.com`, `inboxkit:v@clear-anchor.com`, `inboxkit:v@orbit-ignite.com`. Explee buys pre-warmed cold-email mailboxes from **Icemail** and **InboxKit** (both resell Google/Microsoft mailboxes for outreach). The local part is the sender's first initial (`v@`) on every domain, and the display name is the customer's sender name (`from_name_rotated: false`).
+- **Replies are threaded on the original mailbox:** the reply to a hot lead went out from the same mailbox as the first email, with correct `In-Reply-To`/`References` and `Re:` subject. Inbound replies get a **DKIM check** (`dkim_result: pass`, signer recorded) and the signed .eml is stored (`has_signed_eml`). *Inferred:* this is evidence for disputes and spoof filtering.
+- **Hot-lead case (Villa developers):** first email at 08:04 IST offered "a few short written ideas" on the lead's named project. The reply was a one-word "Ok" plus signature, 1 h 44 min later; the classifier marked it `hot_lead`, temperature hot, and set lead status Hot. The answer went out **26 h later** (10-23 12:08 IST) with `manual_reply: true`, CC to the owner's email (`reply_cc_emails`), and the UI line "Joined the conversation: <owner email>". It delivered three concrete positioning bullets built from the company description (acre size, amenities, local catchments) plus the Cal.com booking link. Because `total_auto_replies` is 0 and `manual_reply` is true, this was sent through the inbox composer, which pre-fills an AI suggestion (see 6f), not by the auto-reply job.
+- **Email-changed case:** the first email went to a finance manager; an automatic "contact person changed" notice came back **2 seconds** later naming a successor and their email. Explee classified it `email_changed`, retired the old address, added the successor as a new contact, and sent them a **fresh first-touch email the next day from a different domain** with a new subject, no thread and no mention of the handoff. The successor was also in finance, not marketing, so the decision-maker filter didn't run on the new contact.
+- **Classifier gaps:** a one-word "Ok" counts as hot, and an instant system notice counts as a human handoff. Neither is wrong for the outcome, but the confidence isn't shown anywhere.
+- **Recipient addresses** are revealed (`email_revealed: true`) only on contacts that replied.
+
+### 6f. Sending pool and reply mechanics (aggregated in-tab over all 360 sent contacts, plus the inbox JS bundle)
+
+**Pool.** 105 distinct sender domains for 360 emails (most used 2-6 times, at most 3 per domain per day). Every mailbox is `v@<domain>` (the sender's first initial). TLDs: .com 261, .org 33, .co 23, .digital 20, .site 19, .ink 4. Names are random two-word brandables (`connectcyclecore.com`, `launchtidequartz.com`). 97 of the 105 domains sent for more than one campaign. All 360 `send_status: sent`; 2 bounces (Commercial Developers 1, Plotted developers 1).
+
+**Timing.** 295 of 360 (82%) went out in the 08:00 IST hour and 31 more at 09:00. The queue drains in a burst when the India window opens, not spread through the day. About 30 sends fell outside 8 AM-7 PM IST; the 10-20 sends at 19:58-20:06 IST are among them. *Inferred:* the rest are leads whose country resolves to a different window (the schedule is per lead country). Not verified per lead.
+
+**Reply UI → API (from the bundle):**
+
+| Action | Call | Notes |
+|---|---|---|
+| Open a thread | `GET /segments/{id}/outreach/thread/{personId}` | response also carries `scheduled_auto_reply`, `reply_blocked_reason`, `draft_on_click`, `needs_intent_feedback`, `intent_feedback` |
+| AI suggested reply | `POST /segments/{id}/outreach/auto-reply/{personId}` | fired automatically when a thread opens with no scheduled auto-reply (5 min cache); fills the composer. With `draft_on_click`, only on click |
+| Send a reply | `POST /segments/{id}/outreach/send {person_id, body_text, material_ids?, cc_emails?}` | stored as `manual_reply: true`; subject is `Re: <last subject>`, sent from the thread's mailbox |
+| Scheduled auto-reply: send now | `POST …/auto-reply/{id}/send-now` | skips the 24 h delay |
+| Scheduled auto-reply: cancel | `DELETE …/auto-reply/{id}` | the cancelled body is moved into the composer for editing |
+| Correct the classifier | `POST …/thread/{personId}/intent-feedback {label}` | `not_relevant` → lead status Unqualified |
+| Other | `outreach/cc/validate {cc_emails}`, `outreach/materials` (file attachments, moderated), `replies/{id}/original.eml`, `sent/{id}/retry`, `save-followup-rules {rules}`, `projects/{id}/reply-preview {instructions, person_id}` (reply-copy tester), `notification-preferences`, `reply-recipients` | |
+
+**So for the hot-lead case (6e):** `manual_reply: true` plus the auto-fetched suggestion means someone opened the thread, got Explee's AI draft pre-filled, and pressed Send (or edited and sent). The auto-reply job never fired, which fits `total_auto_replies: 0`.
+
+**Debug endpoints shipped to the client:** the production bundle includes `/api/app-auto-gtm/_debug/sender/{lead-inject-reply, lead-advance-touch, lead-reset, lead-send, segment-drain}` (inject a fake reply with a chosen intent, force the next touch, drain a segment). *Inferred:* these are server-gated to staff, but their names and payloads are public. Not tested.
+
+### 6g. Day 10: follow-ups, auto-replies, credit exhausted (checked 2026-10-29 ~12:50 IST)
+
+**Totals (all time):** 750 emails to 539 people: 539 first touches + 211 follow-ups. 11 replies (5 hot, 5 not interested, 1 email changed), 7 bounced. Daily: 10-23 107, 10-24 (Sat) 0, 10-25 234, 10-26 132, 10-27 24, then 0.
+
+**Credit ran out on 10-27.** Spend hit exactly $30.00; balance $0, `is_empty: true`. Every active campaign is now `status_reason: billing_pause` ("Sending stopped — unpaid balance. Top up your balance to resume."), state `listening` (still ingests replies). No card was charged: `credits-activity` holds only the $30 trial bonus. *Inferred:* no card on file, so auto-recharge had nothing to charge. Cost per hot lead: $30 / 5 = **$6**.
+
+**Follow-ups** (in-tab aggregate over 60 of the 211 follow-up threads, no PII exported):
+- Exactly 1 follow-up per lead so far (`max_touches: 2` means first + 1 follow-up). 1 thread had 3 sends, the email-changed case below.
+- **Same mailbox, same thread every time:** 60/60 from the first email's mailbox, `Re: <first subject>`, `In-Reply-To` set.
+- **Gap:** 3.0 days in 37/60, 4-6 days in the rest, the delay being pushed past non-sending days (Saturday) and the 7 PM cutoff.
+- **Timing:** 51/60 in the 08:00 IST hour, the same morning burst as first touches. The first follow-ups went out Sunday 10-25 as predicted; that day sent 234 emails (~$9.36), almost the full $10 budget, because follow-ups and new first touches queued together.
+- **Copy:** 35-59 words (median 47), plain text, no links. Pattern: "Quick follow-up on my last note." → **one new, specific fact** about the lead (plot size and RERA status with the buyer-city gap; website traffic growth of +165%) → a soft yes/no question ("Is that on your radar this quarter? A short no is fine too.") → full sender name. The follow-up uses a different research fact from the first email rather than repeating it.
+
+**Auto-replies are now live.** `auto_reply_delay_minutes` is **240** (was 1440 on 10-23); *open question:* whether the user changed it. 2 hot replies got an auto-reply exactly **4.0 h** later (`manual_reply: false`):
+- Lead asked for a phone call → auto-reply pushed a booking link instead ("Easiest way to get that call set up is to pick any slot"). It used **`cal.link/…`**, a short link, not the project's `cal.com` URL. *Inferred:* click tracking; not verified.
+- Lead said "Pls do send" → a long auto-reply with 3 numbered ideas (ads, landing pages + CRM routing, …), built from the project description.
+- 3 other hot replies were answered **manually** (5.1 h, 25.5 h, 26.3 h). One was a pricing answer ("priced per campaign … dated written quote … media spend paid directly to Meta and Google"), which suggests the owner wrote or edited it, since the facts KB is empty.
+- `dashboard.total_auto_replies` still says 0 even though 2 auto-replies went out: a counter bug.
+- `not_interested` replies get no answer and no further follow-ups (`stop_on_reply`).
+- Email-changed: the new contact got a first touch 24 h later and a follow-up 3 days after that, the normal sequence restarted for the successor.
+
+**Classifier:** "Ok", "Pls do send", "All matter. Do stare [state] the cost" and "Please call me" all → `hot_lead`. "We have an in-house agency" / "already doing it" / "No" → `not_interested`. No misclassifications seen in 11.
+
+### 6h. Deliverability: how the rotating senders avoid spam (DNS + RDAP on 15 of the 105 domains, 2026-10-29)
+
+| Measure | What we found |
+|---|---|
+| **Many domains, low volume each** | 105 domains for 750 emails; max 8 sends per domain over 10 days, ≤3 per domain per day. One mailbox per domain (`v@`). Follow-ups reuse the domain, so no new domains were needed. *Unknown:* how many other customers share each mailbox. |
+| **Real mailbox providers, not a bulk SMTP** | 14/15 domains have MX `smtp.google.com` and SPF `include:_spf.google.com`, i.e. **Google Workspace** inboxes. 1 (`go-cascade.com`) runs on **Amazon SES** with its own inbound MX and `-all`. Inboxes are bought from cold-email mailbox resellers, visible in `mailbox_id`: **icemail**, **inboxkit**, **zapmail**. |
+| **Full authentication** | Every sampled domain has SPF, a Google DKIM key (`google._domainkey`), and **DMARC at `p=reject` or `p=quarantine`, pct=100**, with rua/ruf reports to a mailbox on the same domain. Inbound replies are DKIM-checked too (6e). |
+| **Aged / warmed domains** | Registered 2026-06-29 to 2026-09-24, so 1-4 months old before first use on 10-20. Registrars Spaceship, Dynadot, NameSilo (cheap, bulk-friendly); DNS on shared **ClouDNS** nameservers (`pns61/62`, `pns71/72`) or Cloudflare. Domain age plus provider warm-up is the main reputation lever. |
+| **Brandable names, no website** | Random two-word names (`get-`, `join-`, `hello-`, `try-`, `use-`, `lets-` + word) across .com/.org/.co/.digital/.site/.ink. None serve a website (no A record, or a Cloudflare A that doesn't answer). *Gap:* a recipient who checks the domain finds nothing, which hurts trust and can hurt reputation with some filters. |
+| **Spam-safe content** | Plain text only (`body_html: null` on sends): no HTML, no tracking pixel, **no links in first touches or follow-ups**. The only link appears after a positive reply. 35-100 words, no attachments. |
+| **Human sending pattern** | Per-country business hours, Mon-Fri + Sun, ≤3/day per domain, replies threaded on the same mailbox, follow-ups stop on any reply. *Caveat:* the 08:00 burst (82% of sends in one hour) is not human-like. |
+| **Bounce control** | 7 bounces in 750 (0.9%), consistent with addresses being verified before sending. |
+| **Name consistency** | From display name = the customer's sender name on every send (`from_name_rotated: false`), signature matches. The **domain** never matches the brand in the signature ("QD & Co." from `@gethotgrove.com`). |
+
+**What we can't see from outside:** List-Unsubscribe headers (sent .eml isn't exposed), per-mailbox daily caps across all customers, and the warm-up network itself.
+
+**For Leadex:** copy the authentication setup (SPF + DKIM + DMARC reject), plain-text no-link first touches, per-domain caps, threaded follow-ups and inbound DKIM checks. Do differently: domains tied to the customer's brand (#17), a one-page site on every sending domain naming the real company, sends spread across the window instead of a burst at window open, and a List-Unsubscribe header on every send.
+
 ## 7. Sending infrastructure (partial)
 
 - Pre-warmed mailboxes owned by Explee, rotated per send. The sender display name defaults to a persona per mailbox.
@@ -243,6 +319,66 @@ Workspace-wide list. People are matched by email, LinkedIn, or name + company, a
 
 ---
 
+## 9. Remaining console details (2026-10-29)
+
+**Plans** (`/subscription`, `/pricing`): Classic `classic_4`, $0/month, $0.04/email, `max_followups: 2`, custom sender name, HubSpot, CSV export, white label, **no deep email search**, `entry_paywall: true`. Upsell **Growth: $99/month, $0.037/email, 3 follow-ups**. Budget tiers in the slider: Light ≤$15/day ("learning is slow at this pace"), Typical ≤$25, Growth ≤$50, Power. Marketing claims: "400M+ people profiles", "97% deliverability". Projection model: 21 sending days/month, reply rate 0.25-0.45%, meeting rate 0.06-0.24% per email. *Our run:* 1.5% reply rate, above their projection.
+
+**Follow-up count is ambiguous:** the plan says `max_followups: 2`, but the project's `followup_rules.max_touches: 2` and every lead got exactly 1 follow-up before sending stopped. *Open:* whether a second follow-up was still due (sending stopped on 10-27 for billing), or whether `max_touches` counts the first email.
+
+**Own domains (BYOD), from `outreach/byod` and the FAQ:**
+- Package: 5 mailboxes, 125 emails/day, $29/month (`domain_price_usd_month: 4`, `mailbox_price_usd_month: 5`). Min 2 domains, max 100. For a $10/day budget (250 emails/day) it recommends 2 domains.
+- **Warm-up 7 days, then a 14-day ramp from 10 to 25 emails per mailbox per day (+1/day).** "Our network sends the rest" while ramping. Order today → first emails Nov 6 (8 days).
+- Domains are registered in the customer's name, `.com` only, can be transferred out after 60 days (mailboxes stop). DNS is locked while Explee runs the mail. **Each domain redirects to the customer's main website** (the shared-pool domains don't). They refuse to send from the main domain ("puts its reputation at risk… can take months to recover"), and you can't bring an existing domain. Claimed bounce rate <1%. "You as the sender" are responsible for content.
+- Mailbox names are final once bought.
+- Network stats: `byod/network` → last 14 days: 743 emails, 105 mailboxes, 105 domains, top mailbox 12 sends.
+
+**Integrations:** HubSpot (not connected; `deal_mode: hot_and_warm`, pipeline/stage pickers, push counter). Webhooks: **one event only, `hot_lead.received`**, max 20 URLs (pitched for GoHighLevel, Make, n8n, Attio). Zapier: a copyable "Copilot prompt" that builds an hourly poll Zap (3 h lookback, find-or-create on email, Google Sheet fallback). "Custom / API": a copyable agent prompt for Claude/ChatGPT/Cursor with the API key and project id pre-filled, pointing at `llms.txt` + `openapi.json`. Salesforce and Pipedrive are "Soon". API key: one "Default" org key, never used.
+
+**Notifications** (`notification-preferences`): daily_digest, autopilot_recap, leads_review, product_updates, founder_mail (all on). `reply-recipients`: per-user toggle for who receives reply alerts (owner only here).
+
+**Suppress list** (`/app-auto-gtm/dedup`): org-wide, people (CSV, any format) + companies (domain list). Cancels mail already queued. Separate from search dedup lists.
+
+**Referral:** give $25 / get $25 on the referee's first payment, $500/year cap; affiliate 20% of payments for 12 months.
+
+**Email sequence page:** tabs First email / Follow-ups / Replies, one project default used by all 6 campaigns; mode Instructions or My copy (3,000 chars); language "Lead's language". Opening it fires `POST projects/{id}/reply-preview` (a sample AI reply for a real lead). Brief in the reply tab (`reply_instructions`) is empty for this project; replies were written from the project description alone.
+
+## 10. Public API (`https://api.explee.com/public/api`, saved in `explee-api/`)
+
+Explee publishes its full API: `llms.txt` (agent guide) and `openapi.json` (70 operations, 300 KB), with interactive docs at `/public/api/docs`. Auth `X-API-Key`; 10,000 req/h, 150 concurrent per org; 90 s timeout.
+
+**Outreach API** (same features as the console): projects, campaigns (create from just a `name`: Explee drafts offer/problem/criteria/keywords), `PATCH` campaign definition (any search field re-aims the campaign and drops uncontacted leads; the new search starts 5 min after the last change and then needs re-approval), approve, start/stop, budgets (project, or per campaign only with Auto-manage OFF, else `409`), analytics, inbox list/thread/reply (≤3 replies per inbound message, attachments ≤25 MB, moderated), lead notes, hot-leads feed (`since` polling, `why_hot` verbatim), suppress lists, webhooks, billing/usage/activity, **import your own leads** (≤30,000 per import, each import a new campaign; mandatory email, first/last name, company_domain, job_title; free; still personalised per lead; no fixed-body sends), feedback.
+
+**Campaign lifecycle** (from the guide): `discovery` → `review` (approve, or auto-approve after the 12 h review window with Auto-manage ON) → `outreach` → `listening` with `status_reason` `user_pause | budget_pause | lead_pool_exhausted | sending_completed | billing_pause`; `error`.
+
+**Data API, the engine behind lead finding, sold separately:**
+
+| Endpoint | Price (1 credit = $0.01) |
+|---|---|
+| `search/companies` (filters: `definition`, geo include/exclude down to city and subdivision, HQ/customer location, founded, size, revenue, `is_b2b/is_saas/is_startup/is_tech/is_ai/…`, employee geo distribution, plus AI `criteria`) | first 10 free; 0.5 credits/company + 0.1 per criterion |
+| `search/people` (`job_titles` ± exclude, geo, followers, `people_per_company_limit`, `criteria` + company filters) | first 10 free; 1 credit/person + 0.1 per criterion |
+| `search/nl-to-filters` (free text → structured filters) | free |
+| `enrich/email` (basic: 1 provider ~50% hit; premium: 6 providers cross-validated ~78%) | charged only when found |
+| `find-and-enrich` (search + emails, async, `max_contacts`) | search free; 1.5 credits (basic) / 5 credits (premium) per found email |
+| `enrich/phone` by LinkedIn URL (~45-60% hit) | charged only when found |
+| dedup lists (exclude owned companies/people from search) | free |
+
+Free-request quotas per plan: free 50/day, starter 200, growth 500, pro 750, agency 1,500, enterprise 3,000.
+
+**Implication for Leadex:** this is a cheap, documented lead-data vendor: about **$0.01 per person searched + $0.015-0.05 per verified email**, with natural-language-to-filters and company-category (`definition`) search already built. It could fill the "Lead data" row of the build plan instead of PDL, as a vendor behind a repository interface. Risks: dependence on a direct competitor, its terms of service, and data quality (6b).
+
+## 11. Data sources (Explee's own public pages, 2026-10-29)
+
+From `explee.com/b2b-database`, `/gm-dataset`, `/privacy-policy`, `/terms-of-use`:
+
+- **Companies: 105M+ profiles "unified from 310M websites, LinkedIn data, Google Maps and government registries"**: 310M company websites, **74M LinkedIn company profiles**, **210M Google Maps places**, 100M+ registry records. 93 fields, "500+ datapoints per company"; descriptions written by "a deep-research AI agent analyzing at least 5 web pages"; keywords from the site's key pages; company size estimated "from professional networks, the company website, and other public data points". Low fill on many fields (annual revenue 2.4%, last round 0.2%, contact emails 29%). Full refresh every 4 weeks.
+- **Google Maps dataset: 218M+ places in 244 countries** (India 28M+, US 17M+), 55 fields incl. phone, rating, reviews, hours, popular times. Collection method not stated (Google's terms forbid scraping, so either scraped or bought from a Maps-data vendor; *inferred*). Sold separately, "Request a demo".
+- **People (536M / "400M+ profiles")**: no public source page. The fields (LinkedIn profile URL, LinkedIn-hosted photo, headline, follower count, tenure) point to LinkedIn-derived profiles (*inferred*).
+- **Privacy policy:** "publicly available sources, including business directories and registries, corporate information, professional publications, and company websites" plus "data providers, such as professional contact details". No vendor named. Puts the legal basis for outreach on the customer. People can request deletion of their profile. Complaints go to the UK ICO, so the operating entity is UK-based (*inferred*).
+- **Terms of use:** no clause against using the data or API to build a competing database or product, against reselling, or against caching. Accuracy not guaranteed. A separate DPA covers deletion on termination (not public).
+- **Email finding:** "6 providers cross-validated" (API docs), not named.
+
+**For Leadex:** Explee's company layer uses the same public sources we plan to use (websites, registries, Maps) plus LinkedIn. The people layer, the part we can't copy legally, is LinkedIn-derived. Their terms don't forbid building on their API, but the DPA wasn't reviewed; check it before relying on that.
+
 ## What Leadex does better (running list)
 
 1. **Served-market-aware competitors and segments**: no Brazilian competitors for a Bangalore agency.
@@ -263,6 +399,8 @@ Workspace-wide list. People are matched by email, LinkedIn, or name + company, a
 18. **Incremental re-targeting**: a description edit should only regenerate drafts. Explee rebuilt all 5 lead lists (about 50 min and millions of tokens each).
 13. **City-level people targeting**: Explee matches people by country only. Leadex filters by company HQ city/region where data allows, which matters for local businesses like a Bangalore agency.
 9. **Real sender on 100% of emails**: Explee keeps a mailbox persona name on ~10% of sends even after you set your own name.
+19. **Warm handoffs, not cold restarts**: when a reply names a successor, Leadex writes to them in the same thread, or at least says "<name> suggested I contact you", and checks the new person against the decision-maker filter before sending.
+20. **Hot-lead alert within minutes**: a positive reply pushes a notification to the owner right away, with a suggested answer ready to send. Explee's reply went out 26 h after a hot "Ok".
 
 ## Ops notes
 

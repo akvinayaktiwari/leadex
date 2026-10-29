@@ -25,10 +25,11 @@ The reference product is explee.com, observed on 2026-10-20 with REA (`capture-b
 | Buyer segments with criteria and share | ✅ (6) | ✅ (4-6) |
 | Live step-by-step progress (SSE) | ✅ | ✅ |
 | Cache per domain, anonymous preview | ✅ | ✅ |
-| Own 105M-company database (ClickHouse) | ✅ | 🟡 ClickHouse cache that grows from every People Data Labs result |
+| Own company database | ✅ 105M, from 310M websites + LinkedIn + Google Maps + registries | ✅ **Leadex Data**: own ClickHouse database from company websites, official registries and open web data; no LinkedIn or Google Maps |
+| Own people database | ✅ 536M, LinkedIn-derived (inferred) | ✅ registry officers + people on company websites + profession registries, with per-field provenance |
 | Agent searches companies/people with tools | ✅ | ✅ |
-| Email finding | ✅ (user reports Hunter found their email) | ✅ waterfall: Hunter → Prospeo → Findymail |
-| Email verification | unknown | ✅ ZeroBounce |
+| Email finding | ✅ "6 providers cross-validated" | ✅ own finder: learned domain patterns + SMTP verification |
+| Email verification | ✅ | ✅ own SMTP check + catch-all detection; paid verifier optional |
 | Email drafts | ✅ | ✅ (first email + 1 follow-up) |
 | Managed sending, replies, booking | ✅ | ❌ Phase 2 |
 | Learning loop (cost per lead per segment) | ✅ | ✅ basic, from Instantly stats |
@@ -50,53 +51,109 @@ SQS leadex-runs ──► leadex-worker (ECS Fargate service, autoscaled on queu
    (DLQ after 2 receives)            │ pipeline steps; appends events; no 15-min cap
                                      ▼
           DynamoDB: app state (users, runs, run_events, credits, integrations)
-          ClickHouse Cloud: lead cache (companies, people, email_results)
-          External: Anthropic (Claude), People Data Labs, Hunter,
-                    Prospeo, Findymail, ZeroBounce, Stripe, Instantly, Sentry
+          ClickHouse Cloud: Leadex Data (companies, people, emails,
+                            domain_patterns, sources, suppression)
+          leadex-ingest (Fargate, scheduled): registry + open-data imports,
+                            background crawl of new company domains
+          leadex-mailcheck (small EC2 host with port 25 egress): SMTP checks
+          External: Anthropic (Claude), web search API, SEC EDGAR, data.gov.in,
+                    GLEIF, Web Data Commons, Stripe, Instantly, Sentry
+                    (optional, off by default: People Data Labs, ZeroBounce)
 ```
 
 One TypeScript codebase. The HTTP Lambdas reuse RigaChat's `handle` / `streamHandle` split. The worker is the same bundle run as a long-lived SQS consumer in a Fargate container (`backend/worker.ts`), so agent runs and big lead builds have no Lambda time limit. Infrastructure lives in AWS CDK (TypeScript) under `infra/`. Errors from all three go to Sentry.
 
-### Lead cache (ClickHouse)
+### Leadex Data: our own lead database (ClickHouse)
 
-Every company, person and email result bought from a vendor is written to ClickHouse with `source`, `fetchedAt` and `vendorRecordId`. `search_companies` and `search_people` query the cache first and only call vendors for the shortfall. Over time this builds Leadex's own lead database, and repeat searches become free.
+Leadex owns its company and people data. It is built from sources we may lawfully use (research: `docs/research/people-data-sources.md`), grows with every lead build, and never comes from LinkedIn, Google Maps or any site whose terms forbid automated collection. Industry- and country-agnostic: v1 serves any B2B segment outside the EU/EEA/UK.
+
+**Sources (v1)**
+
+| Layer | Source | How | Gives |
+|---|---|---|---|
+| Company identity | the company's own website (crawler from #3) | on demand + background | name, domain, what they sell, industry, location, size signals, technologies, team pages |
+| Company identity | GLEIF LEI file | monthly bulk import | legal name, country, parent/child links |
+| Company discovery | web search API (provider chosen in #8d by terms + price) | on demand per segment | candidate domains for a segment's description |
+| Company + people seed | Web Data Commons schema.org extracts (`Organization`, `Person` with `jobTitle`, `worksFor`) | quarterly import, non-EU/UK only | companies and named staff that sites publish as structured data |
+| Officers | SEC EDGAR (`data.sec.gov`: filings, Form 3/4/5, proxy statements) | daily incremental | US public-company executives and directors |
+| Officers | India company master (data.gov.in) + director data from a licensed MCA reseller | monthly | Indian companies and directors (DIN) |
+| Officers | US state business registries with bulk files (state list chosen in #8b) | per-state schedule | officers of US private companies |
+| People | company websites: team, about, leadership, press and blog-author pages | on demand + background | names, titles, departments, mid-level roles |
+| Profession connectors | US NPI registry (monthly full file), state licence boards, India RERA | built only when a customer segment needs that profession (Phase 1.5) | licensed professionals |
+
+Not used: LinkedIn (any form), Google Maps scraping or storing Places API results, lists without provenance, any page disallowed by robots.txt.
+
+**Optional fallback vendor.** `DATA_VENDOR_FALLBACK=none|pdl` (default `none`). When on, People Data Labs fills only the shortfall of a lead build, and its records are stored only as far as its licence allows (`source = 'pdl'`, `licence_scope` column). Off by default so v1 runs entirely on our own data.
+
+**Provenance on every field.** Each fact is a row in `facts` with source, source URL, retrieval time and extraction method, so we can prove where data came from, show it in exports, and delete a person everywhere on request.
 
 ```sql
 CREATE TABLE companies (
-  domain String, name String, industry LowCardinality(String),
-  employee_count UInt32, country LowCardinality(String), technologies Array(String),
-  keywords Array(String), linkedin_url String, source LowCardinality(String),
-  fetched_at DateTime
-) ENGINE = ReplacingMergeTree(fetched_at) ORDER BY domain;
+  company_id String,            -- sha256(normalized domain)
+  domain String, name String, legal_name String, lei String,
+  description String, industry LowCardinality(String), keywords Array(String),
+  employee_band LowCardinality(String), country LowCardinality(String),
+  region String, city String, technologies Array(String),
+  served_markets Array(String), updated_at DateTime
+) ENGINE = ReplacingMergeTree(updated_at) ORDER BY domain;
 
 CREATE TABLE people (
-  person_key String,  -- sha256(lower(first)|lower(last)|domain)
+  person_key String,            -- sha256(lower(first)|lower(last)|domain)
   domain String, first_name String, last_name String, title String,
-  seniority LowCardinality(String), country LowCardinality(String),
-  linkedin_url String, source LowCardinality(String), fetched_at DateTime
-) ENGINE = ReplacingMergeTree(fetched_at) ORDER BY (domain, person_key);
+  seniority LowCardinality(String), department LowCardinality(String),
+  country LowCardinality(String), is_officer UInt8, updated_at DateTime
+) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (domain, person_key);
 
-CREATE TABLE email_results (
-  person_key String, email String, finder LowCardinality(String),
+CREATE TABLE facts (            -- provenance for every company/person field
+  entity_type LowCardinality(String), entity_id String, field LowCardinality(String),
+  value String, source LowCardinality(String), source_url String,
+  method LowCardinality(String), -- registry | structured_data | page_extract | vendor
+  licence_scope LowCardinality(String), retrieved_at DateTime
+) ENGINE = MergeTree ORDER BY (entity_type, entity_id, field, retrieved_at);
+
+CREATE TABLE domain_patterns (  -- learned email formats per company domain
+  domain String, pattern LowCardinality(String), -- first.last | flast | first | ...
+  evidence_count UInt32, mx_host String, accepts_all UInt8, checked_at DateTime
+) ENGINE = ReplacingMergeTree(checked_at) ORDER BY domain;
+
+CREATE TABLE emails (
+  person_key String, email String, pattern LowCardinality(String),
   status LowCardinality(String), -- valid | invalid | catch_all | unknown
-  verified_by LowCardinality(String), checked_at DateTime
+  checked_by LowCardinality(String), checked_at DateTime
 ) ENGINE = ReplacingMergeTree(checked_at) ORDER BY person_key;
+
+CREATE TABLE suppression (      -- do-not-contact and deletion requests
+  kind LowCardinality(String),  -- person | email | domain
+  value_hash String, reason LowCardinality(String), created_at DateTime
+) ENGINE = ReplacingMergeTree(created_at) ORDER BY (kind, value_hash);
 ```
 
-Cached records older than 90 days are re-verified before delivery. Email results with `status != valid` are never delivered.
+**Search order in a lead build:** (1) Leadex Data, (2) on-demand discovery for the shortfall: web search → crawl candidate sites → profile → extract people → find emails, all written back to Leadex Data, (3) fallback vendor only if enabled. Repeat searches get cheaper and faster as the database grows.
 
-### Email-finder waterfall
+**Freshness:** company profiles re-crawled after 90 days when touched by a build; registry imports on their schedule; emails re-checked after 60 days before delivery. People not seen on any source for 180 days are marked stale and not delivered.
 
-For each person without a cached valid email, try the providers in order and stop at the first `valid`:
+### People extraction from websites
 
-1. **Hunter** Email Finder (name + domain), with its confidence score
-2. **Prospeo**
-3. **Findymail**
-4. Verify the winning address with **ZeroBounce**. Catch-all results are kept only if the user turns on "include risky" (off by default) and are never charged at full price.
+For each company, the crawler fetches team/about/leadership/contact/press pages (same robots.txt and SSRF rules as #3; ≤ 15 pages, ≤ 10 s). `LLM_MODEL_FAST` extracts `{name, title, department, sourceUrl}` with a zod schema. Rules: only people shown as working at this company; no personal social links; skip pages behind login; every person keeps the URL and quote they came from. Schema.org `Person` markup on the page is used first when present.
 
-Each provider is one repository behind a shared `EmailFinderRepository` interface, so providers can be reordered or added in `backend/src/config/email-finders.ts` without code changes elsewhere. Each provider's cost per call is logged so the order can be tuned by hit rate per dollar.
+### Email finder (own)
 
-**Not built:** scraping LinkedIn, or any site whose terms forbid it. The only first-party collection is role addresses (for example `sales@`, `hello@`) found on the target company's own public pages, with robots.txt respected.
+For each person without a fresh `valid` email:
+
+1. **Learn the pattern:** from addresses the company publishes on its own pages (contact, press, footer) and from earlier verified emails at the domain, pick the domain's pattern (`first.last`, `flast`, `first`, `firstl`, …).
+2. **Generate** up to 3 candidates in pattern order.
+3. **Check** each on `leadex-mailcheck`: MX lookup → SMTP `RCPT TO` without sending (no `DATA`) → stop at the first accept. Before that, probe one random address on the domain; if it is accepted the domain is catch-all and results are `catch_all`, never `valid`.
+4. **Write back** the email, its status and the domain pattern.
+
+`leadex-mailcheck` runs on a small EC2 instance with port 25 egress approved by AWS (AWS blocks port 25 by default), a dedicated IP with PTR/HELO on a Leadex-owned domain, and per-domain rate limits (≤ 1 probe per domain per 30 s, ≤ 3 candidates per person). If a mail server greylists or rate-limits us, the result is `unknown` and the person is retried later, not delivered. A paid verifier (`EMAIL_VERIFIER_FALLBACK=none|zerobounce`, default `none`) can double-check `unknown` results.
+
+Catch-all emails are delivered only when the user turns on "include risky" (off by default) and are never charged at full price.
+
+### Privacy and data-subject rights
+
+- Public page `/privacy/remove-me`: anyone can ask to be removed (email, or name + company domain). Verified by a link to that email. Removal deletes the person's rows and `facts`, and adds a hashed entry to `suppression` so the person is never re-collected. SLA: 30 days, target 72 h.
+- Every lead export and push includes `source` and `retrieved_at` per row. The first email template the drafter writes includes a short line saying how we found the contact (required in some markets, good practice everywhere).
+- India: registry data is used under DPDP s. 3(c)(ii) (published under a legal obligation); website data only where the person published it themselves. **Legal review required before launch** (`docs/research/people-data-sources.md`, legal section).
 
 ### Pipeline
 
@@ -106,7 +163,7 @@ Analysis (free, anonymous allowed) runs as one worker invocation. Each step appe
 |---|---|---|---|---|
 | 1 | `crawl` | Normalize domain. Fetch homepage + up to 10 same-origin pages (nav links, /pricing, /about). Respect robots.txt. Cap 2 MB of text. | cheerio | ≤ 8 s |
 | 2 | `profile` | Build a `ProductProfile` | `LLM_MODEL_FAST` | ≤ 8 s |
-| 3 | `competitors` | LLM proposes 15 domains; keep those that PDL company enrich resolves *and* whose HQ country is in the profile's `servedMarkets` (or that operate globally); return up to 10. Observed gap in the reference product (2026-10-20, qdnco.com): a Bangalore-only agency got 8 of 12 competitors from Brazil, Chile or Saudi Arabia. | `LLM_MODEL_FAST` + PDL | ≤ 8 s |
+| 3 | `competitors` | LLM proposes 15 domains; keep those that resolve to a live site in Leadex Data (or a quick homepage fetch) *and* whose country is in the profile's `servedMarkets` (or that operate globally); return up to 10. Observed gap in the reference product (2026-10-20, qdnco.com): a Bangalore-only agency got 8 of 12 competitors from Brazil, Chile or Saudi Arabia. | `LLM_MODEL_FAST` + Leadex Data / crawl | ≤ 8 s |
 | 4 | `segments` | 4-6 `IcpSegment`s with structured company filters and buyer titles | `LLM_MODEL_SMART` | ≤ 10 s |
 
 Segments must be on screen within 30 s (p50).
@@ -115,7 +172,7 @@ Lead build (signed in, uses credits) is a second run type, `lead_build`, for cho
 
 | # | Step id | Does |
 |---|---|---|
-| 5 | `prospect` | Tool-using agent (`LLM_MODEL_SMART`) with tools `search_companies`, `search_people`, `verify_emails`. Hard budgets: ≤ 8 tool calls, ≤ requested lead count + 20% candidates. |
+| 5 | `prospect` | Tool-using agent (`LLM_MODEL_SMART`) with tools `search_companies` (Leadex Data), `discover_companies` (web search → crawl → profile, for the shortfall), `find_people` (Leadex Data + website extraction), `find_emails` (own finder). Hard budgets: ≤ 12 tool calls, ≤ requested lead count + 30% candidates, ≤ 200 new domains crawled per build. |
 | 6 | `qualify` | Drop records whose email domain ≠ company domain, whose company name/domain mismatch (normalized-token check), or whose verification status is not `valid`. LLM scores the fit of each survivor against its segment from 0-100; keep ≥ 60. |
 | 7 | `draft` | One first email + one follow-up per lead (`LLM_MODEL_FAST`), grounded only in `ProductProfile` + lead fields. Each draft stores `personalizationBasis` (which fields were used). |
 | 8 | `charge` | Debit 1 credit per delivered lead (verified email + passed qualify), in one transaction. Failed or dropped candidates cost nothing. |
@@ -213,34 +270,39 @@ export interface EmailDraft { subject: string; body: string; personalizationBasi
 
 - 1 credit = 1 delivered lead (verified email + passed qualify). Analysis is free.
 - New account: 25 free credits, granted once per Cognito user and once per verified email domain.
-- Packs live in `backend/src/config/credit-packs.ts`. Initial values are 250 for $49 and 1,000 for $149. Confirm them before launch so gross margin is ≥ 60% at the measured PDL + ZeroBounce + LLM cost per lead (see acceptance criterion 9).
+- Packs live in `backend/src/config/credit-packs.ts`. Initial values are 250 for $49 and 1,000 for $149. Confirm them before launch so gross margin is ≥ 60% at the measured cost per lead: web search + crawl + LLM extraction + mailcheck infra (+ fallback vendor when enabled) (see acceptance criterion 9).
 
 ### Repositories (each wraps exactly one external system)
 
 | File | Wraps |
 |---|---|
 | `backend/src/repositories/llm-repository.ts` | Anthropic Messages API. `LlmRepository` interface so another provider can be added later. Models come from `LLM_MODEL_SMART` / `LLM_MODEL_FAST`. |
-| `backend/src/repositories/company-data-repository.ts` | People Data Labs company search + enrich |
-| `backend/src/repositories/people-data-repository.ts` | People Data Labs person search |
-| `backend/src/repositories/email-verification-repository.ts` | ZeroBounce batch validate |
-| `backend/src/repositories/email-finders/{hunter,prospeo,findymail}-repository.ts` | one email-finder API each, behind `EmailFinderRepository` |
-| `backend/src/repositories/lead-cache-repository.ts` | ClickHouse Cloud (companies, people, email_results) |
+| `backend/src/repositories/lead-data-repository.ts` | ClickHouse Cloud: Leadex Data (companies, people, facts, domain_patterns, emails, suppression) |
+| `backend/src/repositories/web-search-repository.ts` | the chosen web search API, behind `WebSearchRepository` |
+| `backend/src/repositories/mailcheck-repository.ts` | HTTP client for `leadex-mailcheck` (MX + SMTP RCPT checks) |
+| `backend/src/repositories/registries/{sec-edgar,gleif,india-company-master,mca-director,us-state-*}-repository.ts` | one official source or licensed reseller each, behind `RegistryRepository` |
+| `backend/src/repositories/open-data/web-data-commons-repository.ts` | schema.org extract files (download + parse) |
+| `backend/src/repositories/fallback/pdl-repository.ts` | optional People Data Labs gap-filler behind `LeadVendorRepository` (off by default) |
+| `backend/src/repositories/fallback/zerobounce-repository.ts` | optional verifier for `unknown` results (off by default) |
 | `backend/src/repositories/site-fetch-repository.ts` | HTTP fetch + robots.txt |
 | `backend/src/repositories/instantly-repository.ts` | Instantly: validate key, list campaigns, add leads |
 | `backend/src/repositories/stripe-repository.ts` | Checkout session, webhook verify |
 | `backend/src/repositories/*-table-repository.ts` | one per DynamoDB table |
 
-Vendor endpoint paths and field names are verified against each vendor's current docs while implementing their child issue, and pinned in a fixture-backed contract test.
+External endpoint paths, field names and terms of use are verified against each source's current docs while implementing their child issue, and pinned in a fixture-backed contract test.
 
 ### Environment variables
 
-`AWS_REGION, ANTHROPIC_API_KEY, LLM_MODEL_SMART, LLM_MODEL_FAST, PDL_API_KEY, HUNTER_API_KEY, PROSPEO_API_KEY, FINDYMAIL_API_KEY, ZEROBOUNCE_API_KEY, CLICKHOUSE_URL, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, SENTRY_DSN, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, TURNSTILE_SECRET, KMS_KEY_ID, COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID, SQS_RUNS_QUEUE_URL, FRONTEND_URL, PIPELINE_VERSION, TABLE_USERS, TABLE_ANALYSES, TABLE_RUNS, TABLE_RUN_EVENTS, TABLE_LEADS, TABLE_CREDIT_LEDGER, TABLE_INTEGRATIONS, TABLE_RATE_LIMITS`
+`AWS_REGION, ANTHROPIC_API_KEY, LLM_MODEL_SMART, LLM_MODEL_FAST, WEB_SEARCH_API_URL, WEB_SEARCH_API_KEY, SEC_USER_AGENT, MCA_PROVIDER_API_URL, MCA_PROVIDER_API_KEY, MAILCHECK_URL, MAILCHECK_TOKEN, MAILCHECK_HELO_DOMAIN, DATA_VENDOR_FALLBACK, PDL_API_KEY (only if fallback = pdl), EMAIL_VERIFIER_FALLBACK, ZEROBOUNCE_API_KEY (only if verifier fallback = zerobounce), INGEST_BUCKET, CLICKHOUSE_URL, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, SENTRY_DSN, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, TURNSTILE_SECRET, KMS_KEY_ID, COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID, SQS_RUNS_QUEUE_URL, FRONTEND_URL, PIPELINE_VERSION, TABLE_USERS, TABLE_ANALYSES, TABLE_RUNS, TABLE_RUN_EVENTS, TABLE_LEADS, TABLE_CREDIT_LEDGER, TABLE_INTEGRATIONS, TABLE_RATE_LIMITS`
 
 ### Compliance (v1)
 
-- People records located in the EU, EEA or UK are excluded by default (`countries` filter enforced server-side). A GDPR-ready mode is Phase 2.
+- People records located in the EU, EEA or UK are neither collected nor returned in v1 (enforced in ingestion and in `/api/leads`). A GDPR-ready mode is Phase 2.
 - Generated drafts always end with an `{{unsubscribe}}` placeholder that the user's sending tool fills in.
 - Terms state that the user is the sender and is responsible for CAN-SPAM compliance. Exported CSVs include the data source and retrieval date per row.
+- Collection rules: robots.txt respected; crawler domain blocklist includes linkedin.com, google.com/maps and any site whose terms forbid automated collection; only business-role data (no home addresses, personal phones, personal social profiles).
+- Data-subject requests handled through `/privacy/remove-me` (see "Privacy and data-subject rights"). California (CPRA) access and deletion requests use the same flow.
+- **Before launch:** legal review of sources and lawful basis for India (DPDP Act 2023 + Rules 2025) and US (CAN-SPAM, CPRA).
 
 ## Child Issues
 
@@ -253,10 +315,13 @@ Vendor endpoint paths and field names are verified against each vendor's current
 | 5 | Frontend: URL input, live analysis view rendering events as they arrive, segment picker (original design) | Critical | 3 d / 3 h | 2 |
 | 6 | Domain cache, anonymous rate limits, Turnstile | High | 1 d / 1 h | 2 |
 | 7 | Auth (Cognito) + credits ledger + Stripe Checkout + webhook | High | 3 d / 3 h | 1 |
-| 8 | Lead data repos (PDL company/person, ZeroBounce) with contract tests | High | 2 d / 2 h | 1 |
-| 8a | ClickHouse lead cache: schema, cache-first search, write-through on every vendor result, 90-day re-verify | High | 2 d / 2 h | 8 |
-| 8b | Email-finder waterfall: Hunter → Prospeo → Findymail → ZeroBounce, config-driven order, per-provider cost logging | High | 2 d / 2 h | 8 |
-| 9 | `prospect` agent + `qualify` step | High | 3 d / 3 h | 4, 8a, 8b |
+| 8 | Leadex Data store: ClickHouse schema (companies, people, facts, domain_patterns, emails, suppression), `lead-data-repository`, provenance writes, EU/UK guard, `leadex-ingest` Fargate task skeleton | High | 2 d / 2 h | 1 |
+| 8a | Company layer: on-demand discovery (web search repo, provider chosen by terms + price), batch crawl + profile of candidate domains (reuses #3), GLEIF import | High | 5 d / 5 h | 3, 8 |
+| 8b | People layer: website people extraction (team/about/press pages, schema.org first), SEC EDGAR officers, India company master + licensed director data, first US state bulk registries, Web Data Commons `Person` import | High | 5 d / 5 h | 8, 8a |
+| 8c | Own email finder: pattern learning, candidate generation, `leadex-mailcheck` EC2 service (port 25 approval, PTR/HELO, per-domain rate limits, catch-all detection), optional ZeroBounce for `unknown` | High | 4 d / 4 h | 8 |
+| 8d | Optional fallback vendor (PDL) behind `LeadVendorRepository`, off by default, licence-scoped storage; contract tests | Medium | 1 d / 1 h | 8 |
+| 8e | Privacy: `/privacy/remove-me` with email verification, deletion across tables + suppression, provenance in CSV/push, crawler blocklist | High | 2 d / 2 h | 8 |
+| 9 | `prospect` agent + `qualify` step | High | 3 d / 3 h | 4, 8a, 8b, 8c |
 | 10 | `draft` + `charge` steps | High | 2 d / 2 h | 7, 9 |
 | 11 | Leads table UI, CSV export, Instantly integration + push | High | 2 d / 2 h | 10 |
 | 12 | Eval harness: 20 fixture sites → segment quality; 50-lead hand-check sheet | Medium | 1 d / 1 h | 4, 9 |
@@ -269,28 +334,33 @@ Vendor endpoint paths and field names are verified against each vendor's current
     │       ├─> #5        │                 ▲      ▲
     │       └─> #6        └─> #12 (also #9) │      │
     ├─> #7 ────────────────────────────────────────┘
-    └─> #8 ─┬─> #8a ────────────────────────┤
-            └─> #8b ────────────────────────┘
+    └─> #8 ─┬─> #8a (also #3) ─> #8b ───────┤
+            ├─> #8c ────────────────────────┘
+            ├─> #8d (optional)
+            └─> #8e (before any real lead is delivered)
 ```
 
 ### Sequencing rationale
 
-The run engine (#2) carries every later step. Steps written before it exists would need rework to emit events. Free analysis (#3-#6) ships first because it is the top of the funnel and can be tested with real users before any data spend. Credits (#7) must exist before any paid data call (#9), so no vendor spend can happen without a balance. Learning (#13) needs real send data, so it goes last.
+The run engine (#2) carries every later step. Steps written before it exists would need rework to emit events. Free analysis (#3-#6) ships first because it is the top of the funnel and can be tested with real users before any data spend. Leadex Data (#8-#8c) can start in parallel with the frontend: the company layer reuses the #3 crawler, and the email finder needs only the store. Port 25 approval from AWS can take days, so request it on day one of #8c. Credits (#7) must exist before any paid build (#9). Privacy (#8e) must ship before the first real lead is delivered. Learning (#13) needs real send data, so it goes last.
 
 ## Acceptance Criteria
 
 1. `POST /api/analyses` for an uncached domain shows the first `step` event in the client within 2 s, and all segments within 30 s p50 / 60 s p95, measured over the 20 eval fixture sites.
-2. The same domain requested again within 30 days returns `cached: true`, and the full event replay finishes in under 3 s with 0 LLM or vendor calls (asserted by repository call counters in an integration test).
+2. The same domain requested again within 30 days returns `cached: true`, and the full event replay finishes in under 3 s with 0 LLM, crawl or external data calls (asserted by repository call counters in an integration test).
 3. An SSE disconnect followed by a reconnect with `Last-Event-ID: n` delivers exactly the events with seq > n: no gaps, no duplicates.
 4. A 4th anonymous analysis from one IP in one UTC day returns `429 { code: 'rate_limited' }`. Missing or invalid Turnstile returns `400`.
-5. A lead build for 50 leads delivers its first leads within 90 s p50. Every delivered lead has `emailStatus: 'valid'`, email domain = company domain, and fitScore ≥ 60.
+5. A lead build for 50 leads delivers its first leads within 90 s p50 when Leadex Data already holds matching companies, and within 5 min p50 when every company must be discovered and crawled. Every delivered lead has `emailStatus: 'valid'`, email domain = company domain, and fitScore ≥ 60.
 6. In the 50-lead hand-check, ≥ 70% (35/50) of leads are judged a match for their segment by the reviewer.
-7. Credits: a build delivering k leads debits exactly k credits. A user with balance < requested gets `402` and no vendor call is made. Concurrent builds can never drive the balance below 0 (conditional-write test with 5 parallel debits).
+7. Credits: a build delivering k leads debits exactly k credits. A user with balance < requested gets `402` and no crawl, search, mailcheck or vendor call is made. Concurrent builds can never drive the balance below 0 (conditional-write test with 5 parallel debits).
 8. A Stripe webhook replayed 3 times with the same event id grants credits once.
 9. Measured cost per analysis run ≤ $0.50, and per delivered lead ≤ 40% of the lowest pack's price per credit. Both are logged per run in `leadex_runs.costUsd`.
-10a. A second identical lead search within 90 days is served at least 80% from the ClickHouse cache, with vendor calls only for the shortfall (asserted by repository call counters).
-10b. The waterfall stops at the first `valid` result. A person found by Hunter never triggers a Prospeo or Findymail call (fixture test), and every delivered email has a ZeroBounce `valid` status.
-10. No record with country in EU/EEA/UK is ever returned by `/api/leads` (test with seeded vendor fixtures that include such records).
+10a. A second identical lead search within 90 days is served at least 80% from Leadex Data, with discovery, crawl or fallback calls only for the shortfall (asserted by repository call counters).
+10b. Email finder: a catch-all domain never yields `valid` (fixture SMTP server that accepts everything); the finder stops at the first accepted candidate; no domain gets more than 1 probe per 30 s (clock-controlled test); `DATA` is never sent (protocol transcript assertion).
+10c. Every delivered company and person field has a `facts` row with source, source URL and retrieval time; a delivered lead without provenance fails the build (integration test).
+10d. A confirmed `/privacy/remove-me` request removes the person from `people`, `facts` and `emails`, and a later ingestion or crawl that finds them again does not re-create them (suppression test).
+10e. The crawler never requests a blocklisted host (linkedin.com, Google Maps) or a robots.txt-disallowed path (fixture test).
+10. No record with country in EU/EEA/UK is ever stored or returned by `/api/leads` (test with seeded fixtures that include such records).
 11. Instantly push of 50 leads reports `pushed + skipped = 50`. A key that fails validation is rejected with `422` and is not stored.
 12. Each test in the Testing Plan states its card: `protects=<observable>; fails_when=<wrong result it rejects>; no_claim=<what green does not prove>`.
 13. No layer skips another. A lint rule or test fails if any `routes/` file imports from `repositories/`, or any `services/` file imports an SDK client directly.
@@ -300,9 +370,9 @@ The run engine (#2) carries every later step. Steps written before it exists wou
 
 | Layer | What | Count |
 |---|---|---|
-| Unit | domain normalization, filter → vendor query mapping, qualify rules (domain match, EU exclusion, score threshold), credit math, SSE framing, zod schemas with repair | +30 |
-| Contract | each vendor repository against recorded fixtures (PDL, ZeroBounce, Instantly, Stripe, Anthropic) | +10 |
-| Integration | analysis end to end with stubbed vendors; cache hit; SSE resume; rate limit; lead build with debits; concurrent debit; webhook idempotency | +12 |
+| Unit | domain normalization, segment → search query mapping, email pattern inference and candidate generation, people-extraction schema, qualify rules (domain match, EU exclusion, score threshold), credit math, SSE framing, zod schemas with repair | +40 |
+| Contract | each external repository against recorded fixtures (web search, SEC EDGAR, GLEIF, India company master, MCA provider, Web Data Commons, mailcheck, Instantly, Stripe, Anthropic; PDL/ZeroBounce when enabled) | +14 |
+| Integration | analysis end to end with stubbed externals; Leadex Data hit vs discovery; fake SMTP server (accept, reject, catch-all, greylist); remove-me + suppression; SSE resume; rate limit; lead build with debits; concurrent debit; webhook idempotency | +16 |
 | E2E | paste URL → see segments → sign up → buy pack (Stripe test mode) → build 10 leads → export CSV | +2 |
 | Eval | 20 fixture sites: segment JSON valid + rubric score; 50-lead manual sheet | 1 harness |
 
@@ -319,13 +389,15 @@ The run engine (#2) carries every later step. Steps written before it exists wou
 ## Rollback Plan
 
 - Each child issue ships behind its own deploy. Lambda versions with aliases let you roll back with `aws lambda update-alias` to the previous version.
-- Paid paths are gated by the `LEAD_BUILDS_ENABLED` env flag; set it to `false` to stop all vendor spend instantly.
+- Paid paths are gated by the `LEAD_BUILDS_ENABLED` env flag; set it to `false` to stop all lead builds, crawling for builds and SMTP checks instantly. `INGEST_ENABLED=false` stops scheduled imports.
 - Credit ledger entries are append-only. Corrections are compensating entries, never deletes.
 
 ## Effort Estimate
 
-About 32 human-days total (≈ 6-7 weeks solo), or about 32 hours of focused CC sessions plus review and vendor account setup.
-Breakdown: scaffold 3 d, lead cache 2 d, email waterfall 2 d, run engine 2 d, analysis steps 4 d, frontend 3 d, cache and limits 1 d, auth and credits 3 d, data repos 2 d, agent and qualify 3 d, drafts and charge 2 d, export and Instantly 2 d, evals 1 d, learning loop 2 d.
+About 45 human-days total (≈ 9-10 weeks solo), or about 45 hours of focused CC sessions plus review, AWS port-25 approval and the legal review.
+Breakdown: scaffold 3 d, run engine 2 d, analysis steps 4 d, frontend 3 d, cache and limits 1 d, auth and credits 3 d, **Leadex Data 19 d** (store 2, company layer 5, people layer 5, email finder 4, fallback vendor 1, privacy 2), agent and qualify 3 d, drafts and charge 2 d, export and Instantly 2 d, evals 1 d, learning loop 2 d. Compared with the vendor plan (32 d), owning the data adds about 13 days.
+
+Running cost moves from per-record vendor fees to: web search API calls, LLM extraction (`LLM_MODEL_FAST`, about one call per crawled page set), ClickHouse Cloud, one small EC2 host for mailcheck, and an MCA director-data licence. Measured per run in `leadex_runs.costUsd` (acceptance criterion 9).
 
 ## Files Reference
 
@@ -342,15 +414,20 @@ Breakdown: scaffold 3 d, lead cache 2 d, email waterfall 2 d, run engine 2 d, an
 | `frontend/app/{page,analysis/[domain]/page,leads/page,billing/page,settings/page}.tsx` | Next.js App Router pages |
 | `frontend/src/hooks/use-run-events.ts` | EventSource with resume |
 | `backend/worker.ts` | Fargate SQS consumer entry point |
-| `backend/src/config/email-finders.ts` | waterfall order and per-call cost |
-| `infra/clickhouse/001_lead_cache.sql` | ClickHouse schema above |
+| `backend/src/config/email-patterns.ts` | supported email patterns and their default order |
+| `backend/src/config/crawler-blocklist.ts` | hosts never crawled (linkedin.com, Google Maps, …) |
+| `backend/ingest.ts` | `leadex-ingest` entry point (scheduled registry and open-data imports) |
+| `mailcheck/` | `leadex-mailcheck` service (EC2): MX + SMTP RCPT checks, rate limits, catch-all probe |
+| `frontend/app/privacy/remove-me/page.tsx` | data-subject removal request |
+| `infra/clickhouse/001_leadex_data.sql` | ClickHouse schema above |
 
 ## Out of Scope (v1)
 
 - Sending email, mailbox or domain provisioning, warm-up, reply handling, meeting booking (Phase 2 epic)
 - LinkedIn outreach
 - Teams or workspaces with multiple seats; agency white-label
-- Our own company or people database
+- Profession connectors (NPI, state licence boards, RERA): Phase 1.5, built when a customer segment needs them
+- Any LinkedIn-derived or Google-Maps-scraped data, in any form
 - EU/UK prospect data
 - Bring-your-own lead upload
 - Public API for customers
@@ -376,6 +453,9 @@ Not part of v1. Recorded here so v1 choices don't block it.
 
 ## Related
 
-- Teardown: `docs/research/explee-teardown.md`
+- Teardown: `docs/research/explee-teardown.md` (data sources in section 11)
+- Lead data sources and legal notes: `docs/research/people-data-sources.md`
+- Explee public API reference (for comparison only): `docs/research/explee-api/`
+- Decision 2026-10-29: Leadex owns its lead database (no PDL dependency in v1, no LinkedIn data ever); PDL kept only as an optional, off-by-default gap-filler
 - Reverse-engineering captures of explee.com (2026-10-20), local only, not committed: `flow2.json`, `account-flow.json`, `console-tour2.json`, `agent-session-events.json`
 - Decisions: `e5e4cac1` (no sending in v1), `1ed1b03b` (name, market, repo), `f0574faa` (hybrid stack)
