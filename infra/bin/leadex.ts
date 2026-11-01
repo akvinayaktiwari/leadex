@@ -33,5 +33,11 @@ new LeadexStack(app, `Leadex-${stage}`, {
   ...(process.env.LLM_FAST_INPUT_USD_PER_MTOK && process.env.LLM_FAST_OUTPUT_USD_PER_MTOK
     ? { llmFastPrices: { input: Number(process.env.LLM_FAST_INPUT_USD_PER_MTOK), output: Number(process.env.LLM_FAST_OUTPUT_USD_PER_MTOK) } }
     : {}),
+  ...(process.env.GLEIF_API_URL && process.env.GLEIF_RECORD_URL_BASE
+    ? { gleif: {
+        apiUrl: process.env.GLEIF_API_URL, recordUrlBase: process.env.GLEIF_RECORD_URL_BASE,
+        ...(process.env.INGEST_GLEIF_MATCH_PER_RUN ? { matchPerRun: Number(process.env.INGEST_GLEIF_MATCH_PER_RUN) } : {}),
+      } }
+    : {}),
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: requireEnv('AWS_REGION') },
 })

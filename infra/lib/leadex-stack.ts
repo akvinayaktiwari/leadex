@@ -31,6 +31,8 @@ export interface LeadexStackProps extends StackProps {
   profileConcurrency?: number
   // Optional USD per million input/output tokens of the fast model, for cost logging.
   llmFastPrices?: { input: number; output: number }
+  // GLEIF import + matching: the golden-copy publishes API and the public record page base (both or neither).
+  gleif?: { apiUrl: string; recordUrlBase: string; matchPerRun?: number }
 }
 
 // ClickHouse Cloud is managed outside CDK; its connection details live in the stage's app secret.
@@ -228,6 +230,8 @@ export class LeadexStack extends Stack {
       LLM_MODEL_FAST: props.llmModels.fast,
       FRONTEND_URL: props.frontendUrl,
       ...(props.llmFastPrices ? { LLM_FAST_INPUT_USD_PER_MTOK: String(props.llmFastPrices.input), LLM_FAST_OUTPUT_USD_PER_MTOK: String(props.llmFastPrices.output) } : {}),
+      ...(props.gleif ? { GLEIF_API_URL: props.gleif.apiUrl, GLEIF_RECORD_URL_BASE: props.gleif.recordUrlBase } : {}),
+      ...(props.gleif?.matchPerRun ? { INGEST_GLEIF_MATCH_PER_RUN: String(props.gleif.matchPerRun) } : {}),
     }
   }
 

@@ -80,6 +80,8 @@ LLM_FAST_INPUT_USD_PER_MTOK=<price> LLM_FAST_OUTPUT_USD_PER_MTOK=<price> \
 
 In AWS, deploy with `INGEST_PROFILE_MAX_PER_RUN=<n>` (the ingest task reads `ANTHROPIC_API_KEY` from the stage app secret).
 
+After profiling, the ingest task refreshes GLEIF legal entities (the full golden copy, ~3.5M entities, when the last full import is over 30 days old; otherwise the last-day delta) and matches companies that state a legal name: same normalized name, same country (legal address or head office), an active entity, and exactly one candidate. A match stores the LEI with a fact linking its GLEIF record. Set `GLEIF_API_URL` and `GLEIF_RECORD_URL_BASE` (see `backend/.env.example`) to turn this on; leave them unset to skip it.
+
 Local development and tests use a ClickHouse container (see `backend/.env.example`); the ClickHouse tests run when `CLICKHOUSE_URL` is set and are required in CI.
 
 All configuration comes from environment variables; see `backend/.env.example` and `frontend/.env.example`.

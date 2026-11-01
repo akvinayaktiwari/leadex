@@ -336,6 +336,11 @@ export interface IngestEnv extends LeadDataEnv {
   // Optional, for cost logging: USD per million input / output tokens of LLM_MODEL_FAST.
   LLM_FAST_INPUT_USD_PER_MTOK?: number | undefined
   LLM_FAST_OUTPUT_USD_PER_MTOK?: number | undefined
+  // GLEIF golden-copy publishes API; the GLEIF import and matching jobs run only when it is set.
+  GLEIF_API_URL?: string | undefined
+  // Public page for one LEI (the LEI is appended); required with GLEIF_API_URL.
+  GLEIF_RECORD_URL_BASE?: string | undefined
+  INGEST_GLEIF_MATCH_PER_RUN: number
 }
 
 export type EntityType = 'company' | 'person'

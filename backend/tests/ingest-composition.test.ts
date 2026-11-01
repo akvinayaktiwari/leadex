@@ -4,6 +4,7 @@ import { getIngestEnv } from '../src/lib/env.js'
 
 const BASE = { STAGE: 'dev', CLICKHOUSE_URL: 'http://localhost:8123', CLICKHOUSE_USER: 'u', CLICKHOUSE_PASSWORD: 'p', CLICKHOUSE_DATABASE: 'leadex_dev' }
 const PROFILER = { INGEST_PROFILE_MAX_PER_RUN: '500', ANTHROPIC_API_KEY: 'sk-test', LLM_MODEL_FAST: 'claude-haiku-5-5', FRONTEND_URL: 'https://leadex.example' }
+const GLEIF = { GLEIF_API_URL: 'https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest', GLEIF_RECORD_URL_BASE: 'https://search.gleif.org/#/record/' }
 const RANKS = { CC_DOMAIN_RANKS_URL: 'https://data.commoncrawl.org/projects/hyperlinkgraph/cc-main-2026-apr-may-jun/domain/r.txt.gz' }
 
 async function jobNames(source: Record<string, string>): Promise<string[]> {
@@ -24,14 +25,18 @@ describe('ingest composition', () => {
     expect(getIngestEnv(BASE).INGEST_PROFILE_MAX_PER_RUN).toBe(0)
     expect(() => getIngestEnv({ ...BASE, INGEST_PROFILE_MAX_PER_RUN: '500' })).toThrow(/ANTHROPIC_API_KEY, LLM_MODEL_FAST, FRONTEND_URL/)
     expect(getIngestEnv({ ...BASE, ...PROFILER })).toMatchObject({ INGEST_PROFILE_MAX_PER_RUN: 500, INGEST_PROFILE_CONCURRENCY: 8 })
+    expect(() => getIngestEnv({ ...BASE, GLEIF_API_URL: GLEIF.GLEIF_API_URL })).toThrow(/GLEIF_RECORD_URL_BASE/)
   })
 
-  // protects=jobs register only when configured, and the domain import runs before the profiler;
-  // fails_when=the profiler runs before new domains are imported, or a job runs with no configuration;
+  // protects=jobs register only when configured, in order: domain import, profiler, GLEIF import, GLEIF matching;
+  // fails_when=the profiler runs before new domains are imported, matching runs before the registry is refreshed or
+  // before new companies exist, or a job runs with no configuration;
   // no_claim=does not run the jobs.
   it('registers jobs from configuration, import first', async () => {
     expect(await jobNames(BASE)).toEqual([])
     expect(await jobNames({ ...BASE, ...RANKS })).toEqual(['common_crawl_domains'])
     expect(await jobNames({ ...BASE, ...RANKS, ...PROFILER })).toEqual(['common_crawl_domains', 'company_profiler'])
+    expect(await jobNames({ ...BASE, ...RANKS, ...PROFILER, ...GLEIF })).toEqual(['common_crawl_domains', 'company_profiler', 'gleif_import', 'gleif_match'])
+    expect(await jobNames({ ...BASE, ...GLEIF })).toEqual(['gleif_import', 'gleif_match'])
   })
 })
