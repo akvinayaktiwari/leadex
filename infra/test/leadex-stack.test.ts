@@ -112,8 +112,9 @@ describe('LeadexStack', () => {
     expect(containers.flatMap((container) => (container.Secrets ?? []).map((entry) => entry.Name))).toContain('ANTHROPIC_API_KEY')
   })
 
-  // protects=the daily ingest schedule exists but is disabled unless ingestEnabled is set, and runs ingest.mjs on the worker image;
-  // fails_when=imports start on first deploy before any source is reviewed, or the task runs the queue worker instead;
+  // protects=the daily ingest schedule exists but is disabled unless ingestEnabled is set, runs ingest.mjs on the worker image,
+  // and the company profiler is off (INGEST_PROFILE_MAX_PER_RUN=0) unless set;
+  // fails_when=imports or paid model calls start on first deploy, or the task runs the queue worker instead;
   // no_claim=does not run the task or check that ClickHouse is reachable.
   it('schedules the ingest task, disabled by default', () => {
     template.hasResourceProperties('AWS::Events::Rule', {
@@ -125,22 +126,23 @@ describe('LeadexStack', () => {
     expect(ingest.Command).toEqual(['node', 'ingest.mjs'])
     expect(new Map(ingest.Environment.map((entry) => [entry.Name, entry.Value]))).toEqual(new Map([
       ['STAGE', 'dev'], ['INGEST_ENABLED', 'false'], ['CLICKHOUSE_DATABASE', 'leadex_dev'],
+      ['INGEST_PROFILE_MAX_PER_RUN', '0'], ['LLM_MODEL_FAST', 'claude-opus-5-5'], ['FRONTEND_URL', 'http://localhost:3000'],
     ]))
   })
 
-  // protects=ClickHouse credentials reach the ingest task only as Secrets Manager secrets;
-  // fails_when=CLICKHOUSE_URL/USER/PASSWORD appear as plain env (and so in the template) or are not wired;
+  // protects=ClickHouse credentials and the Anthropic key reach the ingest task only as Secrets Manager secrets;
+  // fails_when=CLICKHOUSE_URL/USER/PASSWORD or ANTHROPIC_API_KEY appear as plain env (and so in the template) or are not wired;
   // no_claim=does not check the secret contains these keys (added by hand, see README).
   it('injects ClickHouse credentials as secrets', () => {
     const ingest = ingestContainer()
     const plain = ingest.Environment.map((entry) => entry.Name)
-    for (const name of ['CLICKHOUSE_URL', 'CLICKHOUSE_USER', 'CLICKHOUSE_PASSWORD']) {
+    for (const name of ['CLICKHOUSE_URL', 'CLICKHOUSE_USER', 'CLICKHOUSE_PASSWORD', 'ANTHROPIC_API_KEY']) {
       expect(plain).not.toContain(name)
       expect((ingest.Secrets ?? []).map((entry) => entry.Name)).toContain(name)
     }
   })
 
-  // protects=turning ingest on flips both the schedule and the container flag together, and the Common Crawl settings reach the task;
+  // protects=turning ingest on flips both the schedule and the container flag together, and the Common Crawl and profiler settings reach the task;
   // fails_when=the rule is enabled but the container still says false (silent no-op), or the ranks URL / max are dropped;
   // no_claim=n/a.
   it('enables schedule and flag together', () => {
@@ -149,6 +151,7 @@ describe('LeadexStack', () => {
       stage: 'dev', frontendUrl: 'http://localhost:3000', pipelineVersion: '1',
       llmModels: { smart: 'claude-opus-5-5', fast: 'claude-opus-5-5' }, ingestEnabled: true,
       ccDomainRanksUrl: 'https://data.commoncrawl.org/projects/hyperlinkgraph/cc-main-2026-apr-may-jun/domain/r.txt.gz', ingestCcMaxDomains: 500000,
+      profileMaxPerRun: 1000, profileConcurrency: 6, llmFastPrices: { input: 1, output: 5 },
       env: { account: '111111111111', region: 'ap-south-1' },
     })
     const enabled = Template.fromStack(stack)
@@ -157,5 +160,7 @@ describe('LeadexStack', () => {
     expect(environment.get('INGEST_ENABLED')).toBe('true')
     expect(environment.get('CC_DOMAIN_RANKS_URL')).toMatch(/cc-main-2026-apr-may-jun/)
     expect(environment.get('INGEST_CC_MAX_DOMAINS')).toBe('500000')
+    expect([environment.get('INGEST_PROFILE_MAX_PER_RUN'), environment.get('INGEST_PROFILE_CONCURRENCY')]).toEqual(['1000', '6'])
+    expect([environment.get('LLM_FAST_INPUT_USD_PER_MTOK'), environment.get('LLM_FAST_OUTPUT_USD_PER_MTOK')]).toEqual(['1', '5'])
   })
 })

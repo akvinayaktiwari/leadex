@@ -12,7 +12,8 @@
     "build:stream": "esbuild stream.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/stream.mjs --external:@aws-sdk/*",
     "build:worker": "esbuild worker.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/worker.mjs --banner:js=\"import { createRequire as __leadexCreateRequire } from 'module'; const require = __leadexCreateRequire(import.meta.url);\"",
     "migrate:clickhouse": "tsx tools/clickhouse-migrate.ts",
-    "build:ingest": "esbuild ingest.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/ingest.mjs --banner:js=\"import { createRequire as __leadexCreateRequire } from 'module'; const require = __leadexCreateRequire(import.meta.url);\""
+    "build:ingest": "esbuild ingest.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/ingest.mjs --banner:js=\"import { createRequire as __leadexCreateRequire } from 'module'; const require = __leadexCreateRequire(import.meta.url);\"",
+    "profile:sample": "tsx tools/profile-sample.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.137.0",

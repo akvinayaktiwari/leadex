@@ -1,10 +1,13 @@
 import type { z } from 'zod'
 import { PipelineError } from '../lib/errors.js'
 import { logInfo } from '../lib/logger.js'
-import type { LlmEffort, LlmJsonResponse, LlmRepository, LlmTurn, StepId } from '../types/index.js'
+import type { LlmEffort, LlmJsonResponse, LlmRepository, LlmTurn, LlmUsage, StepId } from '../types/index.js'
+
+// Pipeline steps log under their step id; background jobs (the company profiler) under their own name.
+export type StructuredCaller = StepId | 'company_profile'
 
 export interface StructuredRequest<T> {
-  step: StepId
+  step: StructuredCaller
   model: string
   effort: LlmEffort
   maxTokens: number
@@ -13,9 +16,11 @@ export interface StructuredRequest<T> {
   schema: z.ZodType<T>
   // PipelineError code used when the output is still invalid after the repair attempt.
   failureCode: string
+  // Called with the token usage of every model call, including the repair attempt.
+  onUsage?: ((usage: LlmUsage) => void) | undefined
 }
 
-function logUsage(step: StepId, attempt: number, response: LlmJsonResponse): void {
+function logUsage(step: StructuredCaller, attempt: number, response: LlmJsonResponse): void {
   const { usage } = response
   logInfo('llm call', { step, attempt, model: usage.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, ok: response.ok })
 }
@@ -29,6 +34,7 @@ type Attempt<T> = { ok: true; value: T } | { ok: false; problem: string; rawText
 async function attempt<T>(llm: LlmRepository, request: StructuredRequest<T>, turns: LlmTurn[], index: number): Promise<Attempt<T>> {
   const response = await llm.generateJson({ model: request.model, effort: request.effort, maxTokens: request.maxTokens, system: request.system, schema: request.schema, turns })
   logUsage(request.step, index, response)
+  request.onUsage?.(response.usage)
   if (!response.ok && response.reason === 'refusal') {
     throw new PipelineError('llm_refused', 'The model declined to analyze this site')
   }

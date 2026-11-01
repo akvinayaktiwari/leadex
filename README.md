@@ -68,6 +68,18 @@ The daily import task (`leadex-ingest`, 03:00 IST) is deployed with its schedule
 
 Company discovery starts from the Common Crawl domain-level web graph. Set `CC_DOMAIN_RANKS_URL` to the release's `*-domain-ranks.txt.gz` (a new release appears each quarter) and `INGEST_CC_MAX_DOMAINS` (default 2,000,000). The job streams the file, keeps the best-linked domains after dropping EU/EEA/UK ccTLDs and government/education suffixes, and stops reading once it has enough; a release that is already imported is not downloaded again. Locally: `INGEST_ENABLED=true INGEST_CC_MAX_DOMAINS=2000 node backend/dist/ingest.mjs` after `npm run build:ingest`.
 
+The company profiler then crawls those domains best-linked first (skipping the platform/CDN list in `backend/src/config/platform-domains.ts`), reads technologies, ad pixels, schema.org business details, agency credits and job-board links from the HTML, and asks `LLM_MODEL_FAST` for a profile in which every field cites the page it came from. A company is stored only with an allowed country taken from the site's own markup or from a quote the code finds on the cited page; everything else is recorded in `domain_crawl_status` with a reason. It is off until `INGEST_PROFILE_MAX_PER_RUN` is above 0.
+
+Measure cost before turning it on:
+
+```bash
+INGEST_ENABLED=true INGEST_CC_MAX_DOMAINS=5000 node backend/dist/ingest.mjs     # import domains
+LLM_FAST_INPUT_USD_PER_MTOK=<price> LLM_FAST_OUTPUT_USD_PER_MTOK=<price> \
+  npm run profile:sample --workspace backend -- --limit 1000                    # prints outcomes, tokens, cost per company
+```
+
+In AWS, deploy with `INGEST_PROFILE_MAX_PER_RUN=<n>` (the ingest task reads `ANTHROPIC_API_KEY` from the stage app secret).
+
 Local development and tests use a ClickHouse container (see `backend/.env.example`); the ClickHouse tests run when `CLICKHOUSE_URL` is set and are required in CI.
 
 All configuration comes from environment variables; see `backend/.env.example` and `frontend/.env.example`.

@@ -28,5 +28,10 @@ new LeadexStack(app, `Leadex-${stage}`, {
   ingestEnabled: process.env.INGEST_ENABLED === 'true',
   ...(process.env.CC_DOMAIN_RANKS_URL ? { ccDomainRanksUrl: process.env.CC_DOMAIN_RANKS_URL } : {}),
   ...(process.env.INGEST_CC_MAX_DOMAINS ? { ingestCcMaxDomains: Number(process.env.INGEST_CC_MAX_DOMAINS) } : {}),
+  ...(process.env.INGEST_PROFILE_MAX_PER_RUN ? { profileMaxPerRun: Number(process.env.INGEST_PROFILE_MAX_PER_RUN) } : {}),
+  ...(process.env.INGEST_PROFILE_CONCURRENCY ? { profileConcurrency: Number(process.env.INGEST_PROFILE_CONCURRENCY) } : {}),
+  ...(process.env.LLM_FAST_INPUT_USD_PER_MTOK && process.env.LLM_FAST_OUTPUT_USD_PER_MTOK
+    ? { llmFastPrices: { input: Number(process.env.LLM_FAST_INPUT_USD_PER_MTOK), output: Number(process.env.LLM_FAST_OUTPUT_USD_PER_MTOK) } }
+    : {}),
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: requireEnv('AWS_REGION') },
 })
