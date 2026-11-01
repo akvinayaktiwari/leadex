@@ -115,3 +115,24 @@ export const competitorsDraftSchema = z.object({
 })
 
 export type CompetitorsDraft = z.infer<typeof competitorsDraftSchema>
+
+// What the model returns for the segments step (#5). Shares are rescaled to sum to 100 after validation.
+export const segmentsDraftSchema = z.object({
+  segments: z.array(z.object({
+    name: z.string().min(1).max(60),
+    useCase: z.string().min(1).max(200),
+    pain: z.string().min(1).max(200),
+    criteria: z.array(z.string().min(1).max(120)).min(2).max(4),
+    buyerTitles: z.array(z.string().min(1).max(60)).min(2).max(6),
+    industries: z.array(z.enum(INDUSTRIES)).min(1).max(4),
+    // 0 means "no limit" for employeeMax.
+    employeeMin: z.number().int().min(0).max(1_000_000),
+    employeeMax: z.number().int().min(0).max(1_000_000),
+    countries: z.array(z.string().regex(/^[A-Z]{2}$/)).max(15),
+    keywords: z.array(z.string().min(1).max(40)).max(8),
+    technologies: z.array(z.string().min(1).max(40)).max(5),
+    sharePct: z.number().min(0).max(100),
+  })).min(4).max(6),
+})
+
+export type SegmentsDraft = z.infer<typeof segmentsDraftSchema>
