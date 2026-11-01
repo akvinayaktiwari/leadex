@@ -1,9 +1,9 @@
 import { Readable, Transform, pipeline, type TransformCallback } from 'node:stream'
-import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import { createInflateRaw } from 'node:zlib'
 import { parse } from 'csv-parse'
 import { z } from 'zod'
 import type { GleifPublish, GleifRecord, GleifSource } from '../types/index.js'
+import { resumableDownload } from './http-download.js'
 
 const LOCAL_HEADER_SIGNATURE = 0x04034b50
 const DEFLATE = 8
@@ -119,24 +119,27 @@ const publishSchema = z.object({
   }),
 })
 
-async function download(url: string, userAgent: string, signal?: AbortSignal): Promise<Response> {
-  const response = await fetch(url, { headers: { 'user-agent': userAgent }, ...(signal ? { signal } : {}) })
-  if (!response.ok || !response.body) throw new Error(`GLEIF download failed: HTTP ${response.status} for ${url}`)
-  return response
+const IDLE_TIMEOUT_MS = 30_000
+const MAX_RESUMES = 5
+
+async function fetchJson(url: string, userAgent: string): Promise<unknown> {
+  const response = await fetch(url, { headers: { 'user-agent': userAgent }, signal: AbortSignal.timeout(IDLE_TIMEOUT_MS) })
+  if (!response.ok) throw new Error(`GLEIF API failed: HTTP ${response.status} for ${url}`)
+  return response.json()
 }
 
 export function createGleifRepository(apiUrl: string, userAgent: string): GleifSource {
   return {
     async latestPublish(): Promise<GleifPublish> {
-      const body = publishSchema.parse(await (await download(apiUrl, userAgent)).json())
+      const body = publishSchema.parse(await fetchJson(apiUrl, userAgent))
       const { publish_date: publishDate, lei2 } = body.data
       return { publishDate: `${publishDate.replace(' ', 'T')}Z`, fullCsvUrl: lei2.full_file.csv.url, fullRecords: lei2.full_file.csv.record_count, lastDayCsvUrl: lei2.delta_files.LastDay.csv.url }
     },
     async *streamRecords(zipUrl: string): AsyncGenerator<GleifRecord> {
       const controller = new AbortController()
-      const response = await download(zipUrl, userAgent, controller.signal)
+      const bytes = resumableDownload(zipUrl, { userAgent, idleTimeoutMs: IDLE_TIMEOUT_MS, maxRetries: MAX_RESUMES, signal: controller.signal })
       // pipeline forwards download, zip and CSV errors to the parser we read, so the loop throws instead of hanging.
-      const rows = pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), new FirstZipEntry(), createInflateRaw(), parse({ bom: true, relax_quotes: true }), () => {})
+      const rows = pipeline(Readable.from(bytes), new FirstZipEntry(), createInflateRaw(), parse({ bom: true, relax_quotes: true }), () => {})
       try {
         yield* recordsFromCsv(rows)
       } finally {
