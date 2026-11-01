@@ -147,4 +147,19 @@ describe.runIf(URL_)('Leadex Data on ClickHouse', () => {
     const [bare] = await repository.searchCompanies({ ...QUERY, keywords: ['crm'] })
     await expect(service.loadDeliverableCompanies([bare!])).rejects.toBeInstanceOf(LeadDataRuleError)
   })
+
+  // protects=company lookups by domain and the "legal name but no LEI" queue read the latest version of each company;
+  // fails_when=an older row without an LEI keeps a matched company in the queue, or a lookup returns stale fields;
+  // no_claim=n/a.
+  it('finds companies by domain and those still missing an LEI', async () => {
+    await repository.insertCompanies([
+      company('needs-lei.example', { legalName: 'Needs Lei Pvt Ltd', updatedAt: '2026-10-29T09:00:00.000Z' }),
+      company('matched.example', { legalName: 'Matched Inc', updatedAt: '2026-10-29T09:00:00.000Z' }),
+    ])
+    await repository.insertCompanies([company('matched.example', { legalName: 'Matched Inc', lei: 'LEI-M', updatedAt: '2026-10-30T09:00:00.000Z' })])
+    expect((await repository.findCompaniesByDomain(['matched.example'])).map((row) => row.lei)).toEqual(['LEI-M'])
+    const queue = (await repository.companiesWithoutLei(100)).map((row) => row.domain)
+    expect(queue).toContain('needs-lei.example')
+    expect(queue).not.toContain('matched.example')
+  })
 })

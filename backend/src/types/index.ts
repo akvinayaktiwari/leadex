@@ -429,6 +429,16 @@ export interface PersonWrite {
 export type WriteOutcome =
   | { status: 'saved'; entityId: string }
   | { status: 'suppressed'; entityId: string }
+  | { status: 'not_found'; entityId: string }
+
+// Fields of a stored company that a later source may add or correct; identity (domain) never changes.
+export type CompanyChanges = Partial<Omit<CompanyDraft, 'domain'>>
+
+export interface CompanyEnrichment {
+  domain: string
+  changes: CompanyChanges
+  facts: FactInput<CompanyField | CompanySignalField>[]
+}
 
 export type SuppressionKind = 'person' | 'email' | 'domain'
 
@@ -477,6 +487,9 @@ export interface LeadDataRepository {
   searchCompanies(query: CompanySearchQuery): Promise<CompanyRecord[]>
   searchPeople(query: PeopleSearchQuery): Promise<PersonRecord[]>
   listFacts(entityType: EntityType, entityIds: string[]): Promise<Fact[]>
+  findCompaniesByDomain(domains: string[]): Promise<CompanyRecord[]>
+  // Companies with a legal name but no LEI yet, most recently updated first (for GLEIF matching).
+  companiesWithoutLei(limit: number): Promise<CompanyRecord[]>
   insertSuppression(entries: SuppressionEntry[]): Promise<void>
   // Returns the subset of the given hashes that are suppressed.
   findSuppressed(kind: SuppressionKind, valueHashes: string[]): Promise<Set<string>>
@@ -506,6 +519,9 @@ export interface DeliverablePerson {
 export interface LeadDataService {
   saveCompany(write: CompanyWrite): Promise<WriteOutcome>
   savePerson(write: PersonWrite): Promise<WriteOutcome>
+  // Adds or corrects fields of a stored company; each changed field needs a fact in `facts`.
+  enrichCompany(enrichment: CompanyEnrichment): Promise<WriteOutcome>
+  companiesWithoutLei(limit: number): Promise<CompanyRecord[]>
   findCompanies(filters: CompanyFilters, limit: number): Promise<CompanyRecord[]>
   findPeople(domains: string[], titleTerms: string[], limit: number): Promise<PersonRecord[]>
   // For delivery: every populated field must be backed by a fact, or this throws LeadDataRuleError (missing_provenance).

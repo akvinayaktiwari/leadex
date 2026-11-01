@@ -228,6 +228,21 @@ function searchMethods(client: ClickHouseClient): Pick<LeadDataRepository, 'sear
   }
 }
 
+function companyLookupMethods(client: ClickHouseClient): Pick<LeadDataRepository, 'findCompaniesByDomain' | 'companiesWithoutLei'> {
+  return {
+    async findCompaniesByDomain(domains: string[]): Promise<CompanyRecord[]> {
+      if (domains.length === 0) return []
+      const rows = await selectRows<CompanyRow>(client, `SELECT ${COMPANY_COLUMNS} FROM companies FINAL WHERE domain IN {domains:Array(String)} ORDER BY domain`, { domains })
+      return rows.map(fromCompanyRow)
+    },
+    async companiesWithoutLei(limit: number): Promise<CompanyRecord[]> {
+      const rows = await selectRows<CompanyRow>(client,
+        `SELECT ${COMPANY_COLUMNS} FROM companies FINAL WHERE lei = '' AND legal_name != '' ORDER BY updated_at DESC, domain LIMIT {limit:UInt32}`, { limit })
+      return rows.map(fromCompanyRow)
+    },
+  }
+}
+
 function suppressionMethods(client: ClickHouseClient): Pick<LeadDataRepository, 'insertSuppression' | 'findSuppressed'> {
   return {
     async insertSuppression(entries: SuppressionEntry[]): Promise<void> {
@@ -251,6 +266,7 @@ export function createLeadDataRepository(client: ClickHouseClient): LeadDataRepo
     insertPeople: (people) => insertRows(client, 'people', people.map(toPersonRow)),
     insertFacts: (facts) => insertRows(client, 'facts', facts.map(toFactRow)),
     ...searchMethods(client),
+    ...companyLookupMethods(client),
     ...suppressionMethods(client),
   }
 }

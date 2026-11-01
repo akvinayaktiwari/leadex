@@ -142,3 +142,47 @@ describe('lead data service: delivery (criterion 10c)', () => {
     await expectRule(service.loadDeliverablePeople([{ ...person, department: 'marketing' }]), 'missing_provenance')
   })
 })
+
+describe('lead data service: enrichment', () => {
+  const registryFact = (field: 'lei' | 'legalName', value: string) => ({
+    field, value, source: 'gleif' as const, sourceUrl: 'https://search.gleif.org/#/record/LEI1', method: 'registry' as const,
+    licenceScope: 'open_data' as const, retrievedAt: '2026-11-01T09:00:00.000Z',
+  })
+
+  // protects=an enrichment adds fields to the stored company (keeping everything else) with its own facts, and the
+  // result is still deliverable;
+  // fails_when=enrichment drops existing fields, writes without its facts, or changes the company id;
+  // no_claim=memory repository.
+  it('adds sourced fields to a stored company', async () => {
+    const { repository, service } = setup()
+    const saved = await service.saveCompany(companyWrite())
+    const outcome = await service.enrichCompany({ domain: 'WWW.acme.com', changes: { lei: 'LEI1' }, facts: [registryFact('lei', 'LEI1')] })
+    expect(outcome).toEqual({ status: 'saved', entityId: saved.entityId })
+    const [latest] = await repository.findCompaniesByDomain(['acme.com'])
+    expect(latest).toMatchObject({ lei: 'LEI1', name: 'Acme', technologies: ['HubSpot'], companyId: saved.entityId })
+    expect(await service.loadDeliverableCompanies([latest!])).toHaveLength(1)
+  })
+
+  // protects=every changed field needs a fact, an unchanged field does not, and unknown domains are reported, not created;
+  // fails_when=a legal name is overwritten without a source, re-sending the same value demands a new fact, or an enrichment
+  // creates a company that was never profiled;
+  // no_claim=n/a.
+  it('requires facts for changed fields only and never creates companies', async () => {
+    const { service } = setup()
+    await service.saveCompany(companyWrite())
+    await expectRule(service.enrichCompany({ domain: 'acme.com', changes: { lei: 'LEI1', legalName: 'Acme Inc' }, facts: [registryFact('lei', 'LEI1')] }), 'missing_provenance')
+    expect(await service.enrichCompany({ domain: 'acme.com', changes: { name: 'Acme' }, facts: [] })).toMatchObject({ status: 'saved' })
+    expect(await service.enrichCompany({ domain: 'unknown.com', changes: { lei: 'X' }, facts: [registryFact('lei', 'X')] })).toMatchObject({ status: 'not_found' })
+  })
+
+  // protects=enrichment cannot move a company into a blocked country or touch a suppressed domain;
+  // fails_when=a registry record with a UK address re-labels a stored US company as GB, or a removed company is updated;
+  // no_claim=n/a.
+  it('keeps the country rule and suppression', async () => {
+    const { service } = setup()
+    await service.saveCompany(companyWrite())
+    await expectRule(service.enrichCompany({ domain: 'acme.com', changes: { country: 'GB' }, facts: [] }), 'blocked_country')
+    await service.suppress('domain', 'acme.com', 'opt_out')
+    expect(await service.enrichCompany({ domain: 'acme.com', changes: { lei: 'LEI1' }, facts: [registryFact('lei', 'LEI1')] })).toMatchObject({ status: 'suppressed' })
+  })
+})
