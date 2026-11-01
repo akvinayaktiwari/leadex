@@ -744,3 +744,12 @@ export interface LegalEntitiesRepository {
   recordImport(record: GleifImportRecord): Promise<void>
   findNames(nameKeys: string[]): Promise<LegalEntityNameRow[]>
 }
+
+export type LegalMatchOutcome = 'matched' | 'no_match' | 'ambiguous'
+
+export interface LegalMatchSummary {
+  checked: number
+  matched: number
+  noMatch: number
+  ambiguous: number
+}
