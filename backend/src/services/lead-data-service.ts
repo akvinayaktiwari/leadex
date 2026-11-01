@@ -198,6 +198,13 @@ export function createLeadDataService(deps: LeadDataServiceDeps): LeadDataServic
     ...createEnrichMethods(deps),
     ...createSearchMethods(deps),
     ...createDeliveryMethods(deps),
+    async allowedEmails(emails: string[]): Promise<Set<string>> {
+      const byEmail = new Map(emails.map((email) => [email, suppressionHash('email', email)] as const))
+      const byDomain = new Map(emails.map((email) => [email, suppressionHash('domain', email.split('@')[1] ?? '')] as const))
+      const blockedEmails = await deps.repository.findSuppressed('email', [...new Set(byEmail.values())])
+      const blockedDomains = await deps.repository.findSuppressed('domain', [...new Set(byDomain.values())])
+      return new Set(emails.filter((email) => !blockedEmails.has(byEmail.get(email) ?? '') && !blockedDomains.has(byDomain.get(email) ?? '')))
+    },
     async suppress(kind: SuppressionKind, value: string, reason: SuppressionReason): Promise<void> {
       const createdAt = deps.clock.now().toISOString()
       await deps.repository.insertSuppression([{ kind, valueHash: suppressionHash(kind, value), reason, createdAt }])

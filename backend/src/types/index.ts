@@ -534,6 +534,8 @@ export interface LeadDataService {
   loadDeliverableCompanies(companies: CompanyRecord[]): Promise<DeliverableCompany[]>
   loadDeliverablePeople(people: PersonRecord[]): Promise<DeliverablePerson[]>
   suppress(kind: SuppressionKind, value: string, reason: SuppressionReason): Promise<void>
+  // The subset of the given addresses that may be stored: not suppressed by email or by their domain.
+  allowedEmails(emails: string[]): Promise<Set<string>>
 }
 
 export interface IngestJobResult {
@@ -794,4 +796,36 @@ export interface PeopleDecision {
   writes: PersonWrite[]
   rejected: Partial<Record<PersonRejection, number>>
   emails: PublishedEmailRow[]
+}
+
+export type PeopleOutcome = 'done' | 'skipped' | 'failed'
+
+export interface PeopleStatusEntry {
+  domain: string
+  status: PeopleOutcome
+  reason: string
+  peopleFound: number
+  attempts: number
+  checkedAt: string
+}
+
+export interface PeopleCandidate {
+  company: CompanyRecord
+  attempts: number
+}
+
+export interface PeopleSelection {
+  limit: number
+  excludedCountries: string[]
+  maxAttempts: number
+  retryFailedBefore: string
+  refreshBefore: string
+}
+
+export interface PeopleExtractionRepository {
+  // Profiled companies never read for people, failed fewer than maxAttempts times and not recently, or due a refresh.
+  nextCompanies(selection: PeopleSelection): Promise<PeopleCandidate[]>
+  recordStatus(entries: PeopleStatusEntry[]): Promise<void>
+  insertPublishedEmails(rows: PublishedEmailRow[]): Promise<void>
+  listPublishedEmails(domain: string): Promise<PublishedEmailRow[]>
 }

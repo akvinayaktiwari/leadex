@@ -12,7 +12,7 @@ import type {
   SuppressionKind,
 } from '../types/index.js'
 
-interface CompanyRow {
+export interface CompanyRow {
   company_id: string
   domain: string
   name: string
@@ -57,7 +57,7 @@ interface FactRow {
 
 const EMPLOYEE_BANDS: ReadonlySet<string> = new Set<EmployeeBand>(['1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5001+'])
 
-const COMPANY_COLUMNS = 'company_id, domain, name, legal_name, lei, description, industry, keywords, employee_band, country, region, city, technologies, served_markets, updated_at'
+export const COMPANY_COLUMNS = 'company_id, domain, name, legal_name, lei, description, industry, keywords, employee_band, country, region, city, technologies, served_markets, updated_at'
 const PERSON_COLUMNS = 'person_key, domain, first_name, last_name, title, seniority, department, country, is_officer, updated_at'
 const FACT_COLUMNS = 'entity_type, entity_id, field, value, source, source_url, method, licence_scope, retrieved_at'
 
@@ -94,7 +94,7 @@ function toCompanyRow(company: CompanyRecord): CompanyRow {
   }
 }
 
-function fromCompanyRow(row: CompanyRow): CompanyRecord {
+export function fromCompanyRow(row: CompanyRow): CompanyRecord {
   return {
     companyId: row.company_id,
     domain: row.domain,
