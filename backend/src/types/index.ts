@@ -341,6 +341,9 @@ export interface IngestEnv extends LeadDataEnv {
   // Public page for one LEI (the LEI is appended); required with GLEIF_API_URL.
   GLEIF_RECORD_URL_BASE?: string | undefined
   INGEST_GLEIF_MATCH_PER_RUN: number
+  // People from company websites: 0 (the default) turns it off; above 0 needs the model settings.
+  INGEST_PEOPLE_MAX_PER_RUN: number
+  INGEST_PEOPLE_CONCURRENCY: number
 }
 
 export type EntityType = 'company' | 'person'

@@ -33,6 +33,9 @@ export interface LeadexStackProps extends StackProps {
   llmFastPrices?: { input: number; output: number }
   // GLEIF import + matching: the golden-copy publishes API and the public record page base (both or neither).
   gleif?: { apiUrl: string; recordUrlBase: string; matchPerRun?: number }
+  // People from company websites: companies per daily run (0 = off, the default) and parallel crawls.
+  peopleMaxPerRun?: number
+  peopleConcurrency?: number
 }
 
 // ClickHouse Cloud is managed outside CDK; its connection details live in the stage's app secret.
@@ -232,6 +235,8 @@ export class LeadexStack extends Stack {
       ...(props.llmFastPrices ? { LLM_FAST_INPUT_USD_PER_MTOK: String(props.llmFastPrices.input), LLM_FAST_OUTPUT_USD_PER_MTOK: String(props.llmFastPrices.output) } : {}),
       ...(props.gleif ? { GLEIF_API_URL: props.gleif.apiUrl, GLEIF_RECORD_URL_BASE: props.gleif.recordUrlBase } : {}),
       ...(props.gleif?.matchPerRun ? { INGEST_GLEIF_MATCH_PER_RUN: String(props.gleif.matchPerRun) } : {}),
+      INGEST_PEOPLE_MAX_PER_RUN: String(props.peopleMaxPerRun ?? 0),
+      ...(props.peopleConcurrency ? { INGEST_PEOPLE_CONCURRENCY: String(props.peopleConcurrency) } : {}),
     }
   }
 

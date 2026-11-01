@@ -49,13 +49,17 @@ const ingestEnvSchema = leadDataEnvSchema.extend({
   GLEIF_API_URL: z.url().optional(),
   GLEIF_RECORD_URL_BASE: z.url().optional(),
   INGEST_GLEIF_MATCH_PER_RUN: z.coerce.number().int().min(1).max(1_000_000).default(5_000),
+  INGEST_PEOPLE_MAX_PER_RUN: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  INGEST_PEOPLE_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(8),
 }).superRefine((env, context) => {
   if (env.GLEIF_API_URL && !env.GLEIF_RECORD_URL_BASE) {
     context.addIssue({ code: 'custom', path: ['GLEIF_RECORD_URL_BASE'], message: 'required when GLEIF_API_URL is set' })
   }
-  if (env.INGEST_PROFILE_MAX_PER_RUN === 0) return
+  // The profiler and the people extractor both call the fast model.
+  const usesModel = env.INGEST_PROFILE_MAX_PER_RUN > 0 || env.INGEST_PEOPLE_MAX_PER_RUN > 0
+  if (!usesModel) return
   for (const name of ['ANTHROPIC_API_KEY', 'LLM_MODEL_FAST', 'FRONTEND_URL'] as const) {
-    if (!env[name]) context.addIssue({ code: 'custom', path: [name], message: 'required when INGEST_PROFILE_MAX_PER_RUN > 0' })
+    if (!env[name]) context.addIssue({ code: 'custom', path: [name], message: 'required when INGEST_PROFILE_MAX_PER_RUN or INGEST_PEOPLE_MAX_PER_RUN > 0' })
   }
 }) satisfies z.ZodType<IngestEnv, Record<string, unknown>>
 

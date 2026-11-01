@@ -10,11 +10,13 @@ import { createDomainCandidatesRepository } from './repositories/domain-candidat
 import { createGleifRepository } from './repositories/gleif-repository.js'
 import { createLeadDataRepository } from './repositories/lead-data-repository.js'
 import { createLegalEntitiesRepository } from './repositories/legal-entities-repository.js'
+import { createPeopleExtractionRepository } from './repositories/people-extraction-repository.js'
 import { createAnthropicLlmRepository } from './repositories/llm-repository.js'
 import { profileBatch, type CompanyProfilerDeps, type ProfileBatchOptions } from './services/company-profiler-service.js'
 import { importDomainRanks } from './services/domain-import-service.js'
 import { importGleif } from './services/gleif-import-service.js'
 import { matchLegalEntities } from './services/legal-entity-matching-service.js'
+import { extractPeopleBatch, type PeopleBatchOptions, type PeopleExtractorDeps } from './services/people-extractor-service.js'
 import { createLeadDataService } from './services/lead-data-service.js'
 import type { IngestEnv, IngestJob, LeadDataService, LlmPrices } from './types/index.js'
 
@@ -62,6 +64,30 @@ export function createProfilerDeps(env: IngestEnv, client: ClickHouseClient, lea
   }
 }
 
+export function peopleOptions(env: IngestEnv, limit: number = env.INGEST_PEOPLE_MAX_PER_RUN): PeopleBatchOptions {
+  return { limit, concurrency: env.INGEST_PEOPLE_CONCURRENCY, maxAttempts: PROFILE_MAX_ATTEMPTS, retryAfterDays: PROFILE_RETRY_AFTER_DAYS, refreshAfterDays: PROFILE_REFRESH_AFTER_DAYS }
+}
+
+// Shares the profiler's crawler, model and prices; undefined when the model settings are missing.
+export function createPeopleDeps(env: IngestEnv, client: ClickHouseClient, leadData: LeadDataService): PeopleExtractorDeps | undefined {
+  const profiler = createProfilerDeps(env, client, leadData)
+  if (!profiler) return undefined
+  const { siteFetch, llm, model, clock, prices } = profiler
+  return { people: createPeopleExtractionRepository(client), leadData, siteFetch, llm, model, clock, prices }
+}
+
+function peopleJob(env: IngestEnv, deps: PeopleExtractorDeps | undefined): IngestJob[] {
+  if (env.INGEST_PEOPLE_MAX_PER_RUN === 0 || !deps) return []
+  return [{
+    name: 'people_extractor',
+    run: async () => {
+      const summary = await extractPeopleBatch(deps, peopleOptions(env))
+      const skipped = Object.values(summary.skipped).reduce<number>((sum, count) => sum + (count ?? 0), 0)
+      return { written: summary.peopleSaved, skipped }
+    },
+  }]
+}
+
 function profilerJob(env: IngestEnv, deps: CompanyProfilerDeps | undefined): IngestJob[] {
   if (env.INGEST_PROFILE_MAX_PER_RUN === 0 || !deps) return []
   return [{
@@ -92,11 +118,14 @@ function gleifJobs(env: IngestEnv, client: ClickHouseClient, leadData: LeadDataS
   ]
 }
 
-// Order matters: new domains are imported before the profiler picks its batch, and companies are profiled
-// before GLEIF matching. The people sources (#23) register here as they land.
+// Order matters: new domains are imported before the profiler picks its batch, companies are profiled before
+// their people are read and before GLEIF matching. Registry people sources (#23 parts 2-3) register here as they land.
 export function createIngestRuntime(env: IngestEnv): IngestRuntime {
   const client: ClickHouseClient = createClickhouseClient(env)
   const leadData = createLeadDataService({ repository: createLeadDataRepository(client), clock: systemClock })
-  const jobs = [...domainRanksJob(env, client), ...profilerJob(env, createProfilerDeps(env, client, leadData)), ...gleifJobs(env, client, leadData)]
+  const jobs = [
+    ...domainRanksJob(env, client), ...profilerJob(env, createProfilerDeps(env, client, leadData)),
+    ...peopleJob(env, createPeopleDeps(env, client, leadData)), ...gleifJobs(env, client, leadData),
+  ]
   return { leadData, jobs, close: () => client.close() }
 }

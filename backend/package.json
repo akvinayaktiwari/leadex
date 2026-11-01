@@ -13,7 +13,8 @@
     "build:worker": "esbuild worker.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/worker.mjs --banner:js=\"import { createRequire as __leadexCreateRequire } from 'module'; const require = __leadexCreateRequire(import.meta.url);\"",
     "migrate:clickhouse": "tsx tools/clickhouse-migrate.ts",
     "build:ingest": "esbuild ingest.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/ingest.mjs --banner:js=\"import { createRequire as __leadexCreateRequire } from 'module'; const require = __leadexCreateRequire(import.meta.url);\"",
-    "profile:sample": "tsx tools/profile-sample.ts"
+    "profile:sample": "tsx tools/profile-sample.ts",
+    "people:sample": "tsx tools/people-sample.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.137.0",
