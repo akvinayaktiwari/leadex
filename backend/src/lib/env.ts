@@ -36,6 +36,9 @@ const ingestEnvSchema = leadDataEnvSchema.extend({
   // Off unless explicitly 'true', so a missing variable never starts imports.
   INGEST_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   SENTRY_DSN: z.string().optional(),
+  CC_DOMAIN_RANKS_URL: z.url().optional(),
+  // How many domains (best-linked first, after filtering) to keep from one release.
+  INGEST_CC_MAX_DOMAINS: z.coerce.number().int().min(1).max(130_000_000).default(2_000_000),
 }) satisfies z.ZodType<IngestEnv, Record<string, unknown>>
 
 let cachedApiEnv: ApiEnv | undefined

@@ -77,7 +77,7 @@ describe('migration statements', () => {
   it('splits SQL into statements without comments', () => {
     const sql = '-- header; not a statement\nCREATE TABLE a (x String); -- trailing\n\nCREATE TABLE b (y String);\n'
     expect(splitStatements(sql)).toEqual(['CREATE TABLE a (x String)', 'CREATE TABLE b (y String)'])
-    const [file] = readMigrationFiles()
+    const file = readMigrationFiles().find((migration) => migration.name === '001_leadex_data.sql')
     const tables = splitStatements(file?.sql ?? '').map((statement) => /CREATE TABLE IF NOT EXISTS (\w+)/.exec(statement)?.[1])
     expect(tables).toEqual(['companies', 'people', 'facts', 'domain_patterns', 'emails', 'suppression'])
   })

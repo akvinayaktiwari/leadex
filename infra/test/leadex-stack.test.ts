@@ -140,18 +140,22 @@ describe('LeadexStack', () => {
     }
   })
 
-  // protects=turning ingest on flips both the schedule and the container flag together;
-  // fails_when=the rule is enabled but the container still says false (silent no-op), or the reverse;
+  // protects=turning ingest on flips both the schedule and the container flag together, and the Common Crawl settings reach the task;
+  // fails_when=the rule is enabled but the container still says false (silent no-op), or the ranks URL / max are dropped;
   // no_claim=n/a.
   it('enables schedule and flag together', () => {
     const app = new App({ context: { 'aws:cdk:bundling-stacks': [] } })
     const stack = new LeadexStack(app, 'Leadex-ingest-on', {
       stage: 'dev', frontendUrl: 'http://localhost:3000', pipelineVersion: '1',
       llmModels: { smart: 'claude-opus-5-5', fast: 'claude-opus-5-5' }, ingestEnabled: true,
+      ccDomainRanksUrl: 'https://data.commoncrawl.org/projects/hyperlinkgraph/cc-main-2026-apr-may-jun/domain/r.txt.gz', ingestCcMaxDomains: 500000,
       env: { account: '111111111111', region: 'ap-south-1' },
     })
     const enabled = Template.fromStack(stack)
     enabled.hasResourceProperties('AWS::Events::Rule', { State: 'ENABLED' })
-    expect(ingestContainer(enabled).Environment.find((entry) => entry.Name === 'INGEST_ENABLED')?.Value).toBe('true')
+    const environment = new Map(ingestContainer(enabled).Environment.map((entry) => [entry.Name, entry.Value]))
+    expect(environment.get('INGEST_ENABLED')).toBe('true')
+    expect(environment.get('CC_DOMAIN_RANKS_URL')).toMatch(/cc-main-2026-apr-may-jun/)
+    expect(environment.get('INGEST_CC_MAX_DOMAINS')).toBe('500000')
   })
 })

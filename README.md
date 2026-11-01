@@ -64,7 +64,9 @@ CLICKHOUSE_URL=... CLICKHOUSE_USER=... CLICKHOUSE_PASSWORD=... CLICKHOUSE_DATABA
   npm run migrate:clickhouse --workspace backend
 ```
 
-The daily import task (`leadex-ingest`, 03:00 IST) is deployed with its schedule disabled. Deploy with `INGEST_ENABLED=true` to turn it on once sources exist (#22, #23).
+The daily import task (`leadex-ingest`, 03:00 IST) is deployed with its schedule disabled. Deploy with `INGEST_ENABLED=true` to turn it on.
+
+Company discovery starts from the Common Crawl domain-level web graph. Set `CC_DOMAIN_RANKS_URL` to the release's `*-domain-ranks.txt.gz` (a new release appears each quarter) and `INGEST_CC_MAX_DOMAINS` (default 2,000,000). The job streams the file, keeps the best-linked domains after dropping EU/EEA/UK ccTLDs and government/education suffixes, and stops reading once it has enough; a release that is already imported is not downloaded again. Locally: `INGEST_ENABLED=true INGEST_CC_MAX_DOMAINS=2000 node backend/dist/ingest.mjs` after `npm run build:ingest`.
 
 Local development and tests use a ClickHouse container (see `backend/.env.example`); the ClickHouse tests run when `CLICKHOUSE_URL` is set and are required in CI.
 
