@@ -36,6 +36,9 @@ export interface LeadexStackProps extends StackProps {
   // People from company websites: companies per daily run (0 = off, the default) and parallel crawls.
   peopleMaxPerRun?: number
   peopleConcurrency?: number
+  // Email finder: people per daily run (0 = off, the default) and the paid verifier. BOUNCER_API_KEY comes from the app secret.
+  emailMaxPerRun?: number
+  emailVerifier?: { name: 'bouncer'; apiUrl: string }
 }
 
 // ClickHouse Cloud is managed outside CDK; its connection details live in the stage's app secret.
@@ -236,6 +239,8 @@ export class LeadexStack extends Stack {
       ...(props.gleif ? { GLEIF_API_URL: props.gleif.apiUrl, GLEIF_RECORD_URL_BASE: props.gleif.recordUrlBase } : {}),
       ...(props.gleif?.matchPerRun ? { INGEST_GLEIF_MATCH_PER_RUN: String(props.gleif.matchPerRun) } : {}),
       INGEST_PEOPLE_MAX_PER_RUN: String(props.peopleMaxPerRun ?? 0),
+      INGEST_EMAIL_MAX_PER_RUN: String(props.emailMaxPerRun ?? 0),
+      ...(props.emailVerifier ? { EMAIL_VERIFIER: props.emailVerifier.name, BOUNCER_API_URL: props.emailVerifier.apiUrl } : {}),
       ...(props.peopleConcurrency ? { INGEST_PEOPLE_CONCURRENCY: String(props.peopleConcurrency) } : {}),
     }
   }
@@ -243,7 +248,9 @@ export class LeadexStack extends Stack {
   private createIngestTask(props: LeadexStackProps, shared: WorkerShared): void {
     const ingestEnabled = props.ingestEnabled ?? false
     const secrets = Object.fromEntries(
-      [...CLICKHOUSE_SECRET_KEYS, 'ANTHROPIC_API_KEY'].map((name) => [name, ecs.Secret.fromSecretsManager(shared.appSecret, name)]),
+      // The Bouncer key is referenced only when Bouncer is configured: a missing JSON key would stop the task from starting.
+      [...CLICKHOUSE_SECRET_KEYS, 'ANTHROPIC_API_KEY', ...(props.emailVerifier ? ['BOUNCER_API_KEY'] : [])]
+        .map((name) => [name, ecs.Secret.fromSecretsManager(shared.appSecret, name)]),
     )
     const cluster = new ecs.Cluster(this, 'IngestCluster', { vpc: shared.vpc })
     new ecsPatterns.ScheduledFargateTask(this, 'Ingest', {

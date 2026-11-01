@@ -344,6 +344,11 @@ export interface IngestEnv extends LeadDataEnv {
   // People from company websites: 0 (the default) turns it off; above 0 needs the model settings.
   INGEST_PEOPLE_MAX_PER_RUN: number
   INGEST_PEOPLE_CONCURRENCY: number
+  // Email finder: 0 (the default) turns it off; above 0 needs a verifier.
+  INGEST_EMAIL_MAX_PER_RUN: number
+  EMAIL_VERIFIER: 'none' | 'bouncer'
+  BOUNCER_API_URL?: string | undefined
+  BOUNCER_API_KEY?: string | undefined
 }
 
 export type EntityType = 'company' | 'person'

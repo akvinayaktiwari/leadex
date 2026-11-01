@@ -35,6 +35,8 @@ new LeadexStack(app, `Leadex-${stage}`, {
     : {}),
   ...(process.env.INGEST_PEOPLE_MAX_PER_RUN ? { peopleMaxPerRun: Number(process.env.INGEST_PEOPLE_MAX_PER_RUN) } : {}),
   ...(process.env.INGEST_PEOPLE_CONCURRENCY ? { peopleConcurrency: Number(process.env.INGEST_PEOPLE_CONCURRENCY) } : {}),
+  ...(process.env.INGEST_EMAIL_MAX_PER_RUN ? { emailMaxPerRun: Number(process.env.INGEST_EMAIL_MAX_PER_RUN) } : {}),
+  ...(process.env.EMAIL_VERIFIER === 'bouncer' && process.env.BOUNCER_API_URL ? { emailVerifier: { name: 'bouncer' as const, apiUrl: process.env.BOUNCER_API_URL } } : {}),
   ...(process.env.GLEIF_API_URL && process.env.GLEIF_RECORD_URL_BASE
     ? { gleif: {
         apiUrl: process.env.GLEIF_API_URL, recordUrlBase: process.env.GLEIF_RECORD_URL_BASE,

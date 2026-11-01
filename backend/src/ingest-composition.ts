@@ -3,28 +3,36 @@ import type { ClickHouseClient } from '@clickhouse/client'
 import { createCrawlerSiteFetch } from './crawler-composition.js'
 import { createAnthropicClient } from './lib/anthropic-client.js'
 import { createClickhouseClient } from './lib/clickhouse-client.js'
-import { systemClock } from './lib/clock.js'
+import { sleep, systemClock } from './lib/clock.js'
+import { createBouncerVerifier } from './repositories/bouncer-verifier-repository.js'
 import { createCommonCrawlRepository } from './repositories/common-crawl-repository.js'
 import { createCrawlStatusRepository } from './repositories/crawl-status-repository.js'
 import { createDomainCandidatesRepository } from './repositories/domain-candidates-repository.js'
+import { createEmailFinderRepository } from './repositories/email-finder-repository.js'
 import { createGleifRepository } from './repositories/gleif-repository.js'
 import { createLeadDataRepository } from './repositories/lead-data-repository.js'
 import { createLegalEntitiesRepository } from './repositories/legal-entities-repository.js'
 import { createPeopleExtractionRepository } from './repositories/people-extraction-repository.js'
 import { createAnthropicLlmRepository } from './repositories/llm-repository.js'
+import { createMailDnsRepository } from './repositories/mail-dns-repository.js'
 import { profileBatch, type CompanyProfilerDeps, type ProfileBatchOptions } from './services/company-profiler-service.js'
 import { importDomainRanks } from './services/domain-import-service.js'
+import { findEmailsBatch, type EmailBatchOptions, type EmailFinderDeps } from './services/email-finder-service.js'
 import { importGleif } from './services/gleif-import-service.js'
 import { matchLegalEntities } from './services/legal-entity-matching-service.js'
 import { extractPeopleBatch, type PeopleBatchOptions, type PeopleExtractorDeps } from './services/people-extractor-service.js'
 import { createLeadDataService } from './services/lead-data-service.js'
-import type { IngestEnv, IngestJob, LeadDataService, LlmPrices } from './types/index.js'
+import type { EmailVerifier, IngestEnv, IngestJob, LeadDataService, LlmPrices } from './types/index.js'
 
 const DOWNLOAD_USER_AGENT = 'LeadexBot/1.0 (open-data import)'
 const DOMAIN_BATCH_SIZE = 10_000
 const PROFILE_MAX_ATTEMPTS = 3
 const PROFILE_RETRY_AFTER_DAYS = 7
 const PROFILE_REFRESH_AFTER_DAYS = 90
+const EMAIL_MAX_CHECKS_PER_PERSON = 2
+const EMAIL_RETRY_UNKNOWN_AFTER_DAYS = 3
+const EMAIL_RECHECK_AFTER_DAYS = 60
+const EMAIL_RATE_LIMIT_BACKOFF_MS = 60_000
 const GLEIF_FULL_EVERY_DAYS = 30
 const GLEIF_BATCH_SIZE = 10_000
 
@@ -88,6 +96,38 @@ function peopleJob(env: IngestEnv, deps: PeopleExtractorDeps | undefined): Inges
   }]
 }
 
+function verifierFrom(env: IngestEnv): EmailVerifier | undefined {
+  if (env.EMAIL_VERIFIER === 'bouncer' && env.BOUNCER_API_URL && env.BOUNCER_API_KEY) return createBouncerVerifier(env.BOUNCER_API_URL, env.BOUNCER_API_KEY)
+  return undefined
+}
+
+export function emailOptions(env: IngestEnv, limit: number = env.INGEST_EMAIL_MAX_PER_RUN): EmailBatchOptions {
+  return {
+    limit, maxChecksPerPerson: EMAIL_MAX_CHECKS_PER_PERSON, retryUnknownAfterDays: EMAIL_RETRY_UNKNOWN_AFTER_DAYS,
+    recheckAfterDays: EMAIL_RECHECK_AFTER_DAYS, rateLimitBackoffMs: EMAIL_RATE_LIMIT_BACKOFF_MS,
+  }
+}
+
+// Undefined when no verifier is configured (env.ts requires one when INGEST_EMAIL_MAX_PER_RUN > 0).
+export function createEmailDeps(env: IngestEnv, client: ClickHouseClient, leadData: LeadDataService): EmailFinderDeps | undefined {
+  const verifier = verifierFrom(env)
+  if (!verifier) return undefined
+  return { finder: createEmailFinderRepository(client), dns: createMailDnsRepository(), verifier, leadData, clock: systemClock, sleep }
+}
+
+function emailJob(env: IngestEnv, deps: EmailFinderDeps | undefined): IngestJob[] {
+  if (env.INGEST_EMAIL_MAX_PER_RUN === 0 || !deps) return []
+  return [{
+    name: 'email_finder',
+    run: async () => {
+      const summary = await findEmailsBatch(deps, emailOptions(env))
+      // Credits running out is reported as a failed job, so the run is visible in logs and Sentry.
+      if (summary.stoppedReason) throw new Error(`email finder stopped early: ${summary.stoppedReason} (${summary.valid} valid so far)`)
+      return { written: summary.valid, skipped: summary.people - summary.valid }
+    },
+  }]
+}
+
 function profilerJob(env: IngestEnv, deps: CompanyProfilerDeps | undefined): IngestJob[] {
   if (env.INGEST_PROFILE_MAX_PER_RUN === 0 || !deps) return []
   return [{
@@ -125,7 +165,8 @@ export function createIngestRuntime(env: IngestEnv): IngestRuntime {
   const leadData = createLeadDataService({ repository: createLeadDataRepository(client), clock: systemClock })
   const jobs = [
     ...domainRanksJob(env, client), ...profilerJob(env, createProfilerDeps(env, client, leadData)),
-    ...peopleJob(env, createPeopleDeps(env, client, leadData)), ...gleifJobs(env, client, leadData),
+    ...peopleJob(env, createPeopleDeps(env, client, leadData)), ...emailJob(env, createEmailDeps(env, client, leadData)),
+    ...gleifJobs(env, client, leadData),
   ]
   return { leadData, jobs, close: () => client.close() }
 }

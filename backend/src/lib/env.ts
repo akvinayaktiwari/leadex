@@ -51,7 +51,19 @@ const ingestEnvSchema = leadDataEnvSchema.extend({
   INGEST_GLEIF_MATCH_PER_RUN: z.coerce.number().int().min(1).max(1_000_000).default(5_000),
   INGEST_PEOPLE_MAX_PER_RUN: z.coerce.number().int().min(0).max(1_000_000).default(0),
   INGEST_PEOPLE_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(8),
+  INGEST_EMAIL_MAX_PER_RUN: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  EMAIL_VERIFIER: z.enum(['none', 'bouncer']).default('none'),
+  BOUNCER_API_URL: z.url().optional(),
+  BOUNCER_API_KEY: z.string().min(1).optional(),
 }).superRefine((env, context) => {
+  if (env.EMAIL_VERIFIER === 'bouncer') {
+    for (const name of ['BOUNCER_API_URL', 'BOUNCER_API_KEY'] as const) {
+      if (!env[name]) context.addIssue({ code: 'custom', path: [name], message: 'required when EMAIL_VERIFIER=bouncer' })
+    }
+  }
+  if (env.INGEST_EMAIL_MAX_PER_RUN > 0 && env.EMAIL_VERIFIER === 'none') {
+    context.addIssue({ code: 'custom', path: ['EMAIL_VERIFIER'], message: 'a verifier is required when INGEST_EMAIL_MAX_PER_RUN > 0' })
+  }
   if (env.GLEIF_API_URL && !env.GLEIF_RECORD_URL_BASE) {
     context.addIssue({ code: 'custom', path: ['GLEIF_RECORD_URL_BASE'], message: 'required when GLEIF_API_URL is set' })
   }
