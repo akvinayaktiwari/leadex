@@ -27,9 +27,12 @@ describe('ingest composition', () => {
     expect(() => getIngestEnv({ ...BASE, INGEST_PEOPLE_MAX_PER_RUN: '50' })).toThrow(/ANTHROPIC_API_KEY, LLM_MODEL_FAST, FRONTEND_URL/)
     expect(getIngestEnv({ ...BASE, ...PROFILER })).toMatchObject({ INGEST_PROFILE_MAX_PER_RUN: 500, INGEST_PROFILE_CONCURRENCY: 8 })
     expect(() => getIngestEnv({ ...BASE, GLEIF_API_URL: GLEIF.GLEIF_API_URL })).toThrow(/GLEIF_RECORD_URL_BASE/)
+    expect(() => getIngestEnv({ ...BASE, INGEST_EMAIL_MAX_PER_RUN: '10' })).toThrow(/EMAIL_VERIFIER/)
+    expect(() => getIngestEnv({ ...BASE, EMAIL_VERIFIER: 'bouncer' })).toThrow(/BOUNCER_API_URL, BOUNCER_API_KEY/)
+    expect(getIngestEnv(BASE)).toMatchObject({ INGEST_EMAIL_MAX_PER_RUN: 0, EMAIL_VERIFIER: 'none' })
   })
 
-  // protects=jobs register only when configured, in order: domain import, profiler, people, GLEIF import, GLEIF matching;
+  // protects=jobs register only when configured, in order: domain import, profiler, people, email finder, GLEIF import, GLEIF matching;
   // fails_when=the profiler runs before new domains are imported, matching runs before the registry is refreshed or
   // before new companies exist, or a job runs with no configuration;
   // no_claim=does not run the jobs.
@@ -42,5 +45,7 @@ describe('ingest composition', () => {
     const people = { ...PROFILER, INGEST_PEOPLE_MAX_PER_RUN: '300' }
     expect(await jobNames({ ...BASE, ...RANKS, ...people, ...GLEIF })).toEqual(['common_crawl_domains', 'company_profiler', 'people_extractor', 'gleif_import', 'gleif_match'])
     expect(await jobNames({ ...BASE, ...PROFILER, INGEST_PROFILE_MAX_PER_RUN: '0', INGEST_PEOPLE_MAX_PER_RUN: '300' })).toEqual(['people_extractor'])
+    const email = { INGEST_EMAIL_MAX_PER_RUN: '500', EMAIL_VERIFIER: 'bouncer', BOUNCER_API_URL: 'https://api.usebouncer.com', BOUNCER_API_KEY: 'k' }
+    expect(await jobNames({ ...BASE, ...RANKS, ...people, ...email, ...GLEIF })).toEqual(['common_crawl_domains', 'company_profiler', 'people_extractor', 'email_finder', 'gleif_import', 'gleif_match'])
   })
 })

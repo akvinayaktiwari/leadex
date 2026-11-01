@@ -127,7 +127,7 @@ describe('LeadexStack', () => {
     expect(new Map(ingest.Environment.map((entry) => [entry.Name, entry.Value]))).toEqual(new Map([
       ['STAGE', 'dev'], ['INGEST_ENABLED', 'false'], ['CLICKHOUSE_DATABASE', 'leadex_dev'],
       ['INGEST_PROFILE_MAX_PER_RUN', '0'], ['LLM_MODEL_FAST', 'claude-opus-5-5'], ['FRONTEND_URL', 'http://localhost:3000'],
-      ['INGEST_PEOPLE_MAX_PER_RUN', '0'],
+      ['INGEST_PEOPLE_MAX_PER_RUN', '0'], ['INGEST_EMAIL_MAX_PER_RUN', '0'],
     ]))
   })
 
@@ -137,13 +137,15 @@ describe('LeadexStack', () => {
   it('injects ClickHouse credentials as secrets', () => {
     const ingest = ingestContainer()
     const plain = ingest.Environment.map((entry) => entry.Name)
+    // No verifier configured in the default stack, so its key must not be referenced (the secret may not contain it).
+    expect((ingest.Secrets ?? []).map((entry) => entry.Name)).not.toContain('BOUNCER_API_KEY')
     for (const name of ['CLICKHOUSE_URL', 'CLICKHOUSE_USER', 'CLICKHOUSE_PASSWORD', 'ANTHROPIC_API_KEY']) {
       expect(plain).not.toContain(name)
       expect((ingest.Secrets ?? []).map((entry) => entry.Name)).toContain(name)
     }
   })
 
-  // protects=turning ingest on flips both the schedule and the container flag together, and the Common Crawl, profiler, people and GLEIF settings reach the task;
+  // protects=turning ingest on flips both the schedule and the container flag together, and the Common Crawl, profiler, people, email and GLEIF settings reach the task, with the verifier key as a secret;
   // fails_when=the rule is enabled but the container still says false (silent no-op), or the ranks URL / max are dropped;
   // no_claim=n/a.
   it('enables schedule and flag together', () => {
@@ -155,6 +157,7 @@ describe('LeadexStack', () => {
       profileMaxPerRun: 1000, profileConcurrency: 6, llmFastPrices: { input: 1, output: 5 },
       gleif: { apiUrl: 'https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest', recordUrlBase: 'https://search.gleif.org/#/record/', matchPerRun: 2000 },
       peopleMaxPerRun: 300, peopleConcurrency: 4,
+      emailMaxPerRun: 500, emailVerifier: { name: 'bouncer', apiUrl: 'https://api.usebouncer.com' },
       env: { account: '111111111111', region: 'ap-south-1' },
     })
     const enabled = Template.fromStack(stack)
@@ -166,6 +169,10 @@ describe('LeadexStack', () => {
     expect([environment.get('INGEST_PROFILE_MAX_PER_RUN'), environment.get('INGEST_PROFILE_CONCURRENCY')]).toEqual(['1000', '6'])
     expect([environment.get('LLM_FAST_INPUT_USD_PER_MTOK'), environment.get('LLM_FAST_OUTPUT_USD_PER_MTOK')]).toEqual(['1', '5'])
     expect([environment.get('INGEST_PEOPLE_MAX_PER_RUN'), environment.get('INGEST_PEOPLE_CONCURRENCY')]).toEqual(['300', '4'])
+    expect([environment.get('INGEST_EMAIL_MAX_PER_RUN'), environment.get('EMAIL_VERIFIER'), environment.get('BOUNCER_API_URL')]).toEqual(['500', 'bouncer', 'https://api.usebouncer.com'])
+    const secrets = (ingestContainer(enabled).Secrets ?? []).map((entry) => entry.Name)
+    expect(secrets).toContain('BOUNCER_API_KEY')
+    expect(environment.has('BOUNCER_API_KEY')).toBe(false)
     expect([environment.get('GLEIF_API_URL'), environment.get('GLEIF_RECORD_URL_BASE'), environment.get('INGEST_GLEIF_MATCH_PER_RUN')])
       .toEqual(['https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest', 'https://search.gleif.org/#/record/', '2000'])
   })

@@ -344,6 +344,11 @@ export interface IngestEnv extends LeadDataEnv {
   // People from company websites: 0 (the default) turns it off; above 0 needs the model settings.
   INGEST_PEOPLE_MAX_PER_RUN: number
   INGEST_PEOPLE_CONCURRENCY: number
+  // Email finder: 0 (the default) turns it off; above 0 needs a verifier.
+  INGEST_EMAIL_MAX_PER_RUN: number
+  EMAIL_VERIFIER: 'none' | 'bouncer'
+  BOUNCER_API_URL?: string | undefined
+  BOUNCER_API_KEY?: string | undefined
 }
 
 export type EntityType = 'company' | 'person'
@@ -843,4 +848,109 @@ export interface PeopleBatchSummary {
   emailsStored: number
   usage: ProfilerUsage
   costUsd?: number | undefined
+}
+
+// ---- Email finder (#24) ----
+
+export type VerificationStatus = 'valid' | 'invalid' | 'catch_all' | 'unknown'
+
+export interface VerificationResult {
+  email: string
+  status: VerificationStatus
+  // Provider's own reason, kept for logging and support.
+  reason: string
+  score?: number | undefined
+  // When the provider asks to retry later (greylisting).
+  retryAfter?: string | undefined
+}
+
+export interface EmailVerifier {
+  name: string
+  verify(email: string): Promise<VerificationResult>
+}
+
+export type MailProvider = 'google' | 'microsoft' | 'other'
+
+export interface DomainMail {
+  domain: string
+  // Lowest-preference MX host, or '' when the domain has no MX (it cannot receive mail).
+  mxHost: string
+  provider: MailProvider
+}
+
+export interface MailDnsRepository {
+  lookup(domain: string): Promise<DomainMail>
+}
+
+export interface EmailCheck {
+  personKey: string
+  domain: string
+  email: string
+  status: VerificationStatus
+  reason: string
+  checkedBy: string
+  checkedAt: string
+}
+
+export interface EmailResult {
+  personKey: string
+  email: string
+  pattern: string
+  status: VerificationStatus
+  checkedBy: string
+  checkedAt: string
+}
+
+export interface DomainPatternRow {
+  domain: string
+  pattern: string
+  evidenceCount: number
+  mxHost: string
+  acceptsAll: boolean
+  checkedAt: string
+}
+
+export interface EmailEvidenceRow {
+  domain: string
+  email: string
+  strength: 'verified' | 'published_linked' | 'published_unlinked'
+  firstName: string
+  lastName: string
+}
+
+export interface PersonNeedingEmail {
+  person: PersonRecord
+  // Company size band, for default format order.
+  employeeBand?: EmployeeBand | undefined
+}
+
+export interface EmailSelection {
+  limit: number
+  excludedCountries: string[]
+  // 'unknown' results are retried after this; 'valid' and 'catch_all' are re-checked after recheckBefore.
+  retryUnknownBefore: string
+  recheckBefore: string
+}
+
+export interface EmailFinderRepository {
+  peopleNeedingEmail(selection: EmailSelection): Promise<PersonNeedingEmail[]>
+  evidence(domains: string[]): Promise<EmailEvidenceRow[]>
+  colleagues(domains: string[]): Promise<PersonRecord[]>
+  invalidAddresses(domains: string[]): Promise<Set<string>>
+  insertChecks(checks: EmailCheck[]): Promise<void>
+  insertResults(results: EmailResult[]): Promise<void>
+  insertDomainPatterns(rows: DomainPatternRow[]): Promise<void>
+}
+
+export interface EmailBatchSummary {
+  people: number
+  valid: number
+  catchAll: number
+  invalid: number
+  unknown: number
+  noMailDomain: number
+  // Paid verifier calls made.
+  checks: number
+  // Set when the batch ended early, e.g. out of verifier credits.
+  stoppedReason?: string | undefined
 }
