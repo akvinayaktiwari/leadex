@@ -829,3 +829,15 @@ export interface PeopleExtractionRepository {
   insertPublishedEmails(rows: PublishedEmailRow[]): Promise<void>
   listPublishedEmails(domain: string): Promise<PublishedEmailRow[]>
 }
+
+export interface PeopleBatchSummary {
+  attempted: number
+  done: number
+  skipped: Partial<Record<string, number>>
+  failed: Partial<Record<string, number>>
+  peopleSaved: number
+  peopleRejected: Partial<Record<PersonRejection | 'suppressed' | 'invalid', number>>
+  emailsStored: number
+  usage: ProfilerUsage
+  costUsd?: number | undefined
+}

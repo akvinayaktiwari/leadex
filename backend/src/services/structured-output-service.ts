@@ -4,7 +4,7 @@ import { logInfo } from '../lib/logger.js'
 import type { LlmEffort, LlmJsonResponse, LlmRepository, LlmTurn, LlmUsage, StepId } from '../types/index.js'
 
 // Pipeline steps log under their step id; background jobs (the company profiler) under their own name.
-export type StructuredCaller = StepId | 'company_profile'
+export type StructuredCaller = StepId | 'company_profile' | 'people_extract'
 
 export interface StructuredRequest<T> {
   step: StructuredCaller
