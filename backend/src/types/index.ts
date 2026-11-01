@@ -336,6 +336,11 @@ export interface IngestEnv extends LeadDataEnv {
   // Optional, for cost logging: USD per million input / output tokens of LLM_MODEL_FAST.
   LLM_FAST_INPUT_USD_PER_MTOK?: number | undefined
   LLM_FAST_OUTPUT_USD_PER_MTOK?: number | undefined
+  // GLEIF golden-copy publishes API; the GLEIF import and matching jobs run only when it is set.
+  GLEIF_API_URL?: string | undefined
+  // Public page for one LEI (the LEI is appended); required with GLEIF_API_URL.
+  GLEIF_RECORD_URL_BASE?: string | undefined
+  INGEST_GLEIF_MATCH_PER_RUN: number
 }
 
 export type EntityType = 'company' | 'person'
@@ -429,6 +434,16 @@ export interface PersonWrite {
 export type WriteOutcome =
   | { status: 'saved'; entityId: string }
   | { status: 'suppressed'; entityId: string }
+  | { status: 'not_found'; entityId: string }
+
+// Fields of a stored company that a later source may add or correct; identity (domain) never changes.
+export type CompanyChanges = Partial<Omit<CompanyDraft, 'domain'>>
+
+export interface CompanyEnrichment {
+  domain: string
+  changes: CompanyChanges
+  facts: FactInput<CompanyField | CompanySignalField>[]
+}
 
 export type SuppressionKind = 'person' | 'email' | 'domain'
 
@@ -477,6 +492,9 @@ export interface LeadDataRepository {
   searchCompanies(query: CompanySearchQuery): Promise<CompanyRecord[]>
   searchPeople(query: PeopleSearchQuery): Promise<PersonRecord[]>
   listFacts(entityType: EntityType, entityIds: string[]): Promise<Fact[]>
+  findCompaniesByDomain(domains: string[]): Promise<CompanyRecord[]>
+  // Companies with a legal name but no LEI yet, most recently updated first (for GLEIF matching).
+  companiesWithoutLei(limit: number): Promise<CompanyRecord[]>
   insertSuppression(entries: SuppressionEntry[]): Promise<void>
   // Returns the subset of the given hashes that are suppressed.
   findSuppressed(kind: SuppressionKind, valueHashes: string[]): Promise<Set<string>>
@@ -506,6 +524,9 @@ export interface DeliverablePerson {
 export interface LeadDataService {
   saveCompany(write: CompanyWrite): Promise<WriteOutcome>
   savePerson(write: PersonWrite): Promise<WriteOutcome>
+  // Adds or corrects fields of a stored company; each changed field needs a fact in `facts`.
+  enrichCompany(enrichment: CompanyEnrichment): Promise<WriteOutcome>
+  companiesWithoutLei(limit: number): Promise<CompanyRecord[]>
   findCompanies(filters: CompanyFilters, limit: number): Promise<CompanyRecord[]>
   findPeople(domains: string[], titleTerms: string[], limit: number): Promise<PersonRecord[]>
   // For delivery: every populated field must be backed by a fact, or this throws LeadDataRuleError (missing_provenance).
@@ -667,4 +688,73 @@ export interface ProfileBatchSummary {
 export interface LlmPrices {
   inputUsdPerMillion: number
   outputUsdPerMillion: number
+}
+
+// ---- GLEIF legal entities (#22 part 3) ----
+
+export interface GleifRecord {
+  lei: string
+  legalName: string
+  otherNames: string[]
+  legalCountry: string
+  legalCity: string
+  hqCountry: string
+  hqCity: string
+  jurisdiction: string
+  category: string
+  legalForm: string
+  entityStatus: string
+  registrationStatus: string
+}
+
+export interface GleifPublish {
+  publishDate: string
+  fullCsvUrl: string
+  fullRecords: number
+  // Changes published in the last day; applied daily after the full file.
+  lastDayCsvUrl: string
+}
+
+export interface GleifSource {
+  latestPublish(): Promise<GleifPublish>
+  // Streams records from a golden-copy CSV zip. Breaking out of the loop stops the download.
+  streamRecords(zipUrl: string): AsyncIterable<GleifRecord>
+}
+
+export interface LegalEntityNameRow {
+  nameKey: string
+  lei: string
+  legalCountry: string
+  hqCountry: string
+  entityStatus: string
+  registrationStatus: string
+  publishDate: string
+}
+
+export type GleifImportKind = 'full' | 'delta'
+
+export interface GleifImportRecord {
+  kind: GleifImportKind
+  publishDate: string
+  records: number
+  importedAt: string
+}
+
+export interface LegalEntitiesRepository {
+  insertEntities(records: GleifRecord[], publishDate: string): Promise<void>
+  insertNames(rows: LegalEntityNameRow[]): Promise<void>
+  // Most recent import of the kind, if any.
+  latestImport(kind: GleifImportKind): Promise<GleifImportRecord | undefined>
+  hasImport(kind: GleifImportKind, publishDate: string): Promise<boolean>
+  recordImport(record: GleifImportRecord): Promise<void>
+  findNames(nameKeys: string[]): Promise<LegalEntityNameRow[]>
+}
+
+export type LegalMatchOutcome = 'matched' | 'no_match' | 'ambiguous'
+
+export interface LegalMatchSummary {
+  checked: number
+  matched: number
+  noMatch: number
+  ambiguous: number
 }

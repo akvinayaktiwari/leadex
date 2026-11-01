@@ -7,10 +7,14 @@ import { systemClock } from './lib/clock.js'
 import { createCommonCrawlRepository } from './repositories/common-crawl-repository.js'
 import { createCrawlStatusRepository } from './repositories/crawl-status-repository.js'
 import { createDomainCandidatesRepository } from './repositories/domain-candidates-repository.js'
+import { createGleifRepository } from './repositories/gleif-repository.js'
 import { createLeadDataRepository } from './repositories/lead-data-repository.js'
+import { createLegalEntitiesRepository } from './repositories/legal-entities-repository.js'
 import { createAnthropicLlmRepository } from './repositories/llm-repository.js'
 import { profileBatch, type CompanyProfilerDeps, type ProfileBatchOptions } from './services/company-profiler-service.js'
 import { importDomainRanks } from './services/domain-import-service.js'
+import { importGleif } from './services/gleif-import-service.js'
+import { matchLegalEntities } from './services/legal-entity-matching-service.js'
 import { createLeadDataService } from './services/lead-data-service.js'
 import type { IngestEnv, IngestJob, LeadDataService, LlmPrices } from './types/index.js'
 
@@ -19,6 +23,8 @@ const DOMAIN_BATCH_SIZE = 10_000
 const PROFILE_MAX_ATTEMPTS = 3
 const PROFILE_RETRY_AFTER_DAYS = 7
 const PROFILE_REFRESH_AFTER_DAYS = 90
+const GLEIF_FULL_EVERY_DAYS = 30
+const GLEIF_BATCH_SIZE = 10_000
 
 export interface IngestRuntime {
   leadData: LeadDataService
@@ -68,11 +74,29 @@ function profilerJob(env: IngestEnv, deps: CompanyProfilerDeps | undefined): Ing
   }]
 }
 
-// Order matters: new domains are imported before the profiler picks its batch.
-// GLEIF (#22 part 3) and the people sources (#23) register here as they land.
+// GLEIF import, then matching, so companies profiled in this run are matched against the newest registry data.
+function gleifJobs(env: IngestEnv, client: ClickHouseClient, leadData: LeadDataService): IngestJob[] {
+  const { GLEIF_API_URL: apiUrl, GLEIF_RECORD_URL_BASE: recordUrlBase } = env
+  if (!apiUrl || !recordUrlBase) return []
+  const entities = createLegalEntitiesRepository(client)
+  const source = createGleifRepository(apiUrl, DOWNLOAD_USER_AGENT)
+  return [
+    { name: 'gleif_import', run: () => importGleif({ source, entities, clock: systemClock }, { fullEveryDays: GLEIF_FULL_EVERY_DAYS, batchSize: GLEIF_BATCH_SIZE }) },
+    {
+      name: 'gleif_match',
+      run: async () => {
+        const summary = await matchLegalEntities({ leadData, entities, clock: systemClock, recordUrlBase }, env.INGEST_GLEIF_MATCH_PER_RUN)
+        return { written: summary.matched, skipped: summary.noMatch + summary.ambiguous }
+      },
+    },
+  ]
+}
+
+// Order matters: new domains are imported before the profiler picks its batch, and companies are profiled
+// before GLEIF matching. The people sources (#23) register here as they land.
 export function createIngestRuntime(env: IngestEnv): IngestRuntime {
   const client: ClickHouseClient = createClickhouseClient(env)
   const leadData = createLeadDataService({ repository: createLeadDataRepository(client), clock: systemClock })
-  const jobs = [...domainRanksJob(env, client), ...profilerJob(env, createProfilerDeps(env, client, leadData))]
+  const jobs = [...domainRanksJob(env, client), ...profilerJob(env, createProfilerDeps(env, client, leadData)), ...gleifJobs(env, client, leadData)]
   return { leadData, jobs, close: () => client.close() }
 }

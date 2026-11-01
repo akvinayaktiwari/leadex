@@ -63,6 +63,14 @@ export function memoryLeadData(): MemoryLeadData {
     async searchCompanies(query: CompanySearchQuery) { return store.companies.slice(0, query.limit) },
     async searchPeople(query: PeopleSearchQuery) { return store.people.filter((person) => query.domains.includes(person.domain)).slice(0, query.limit) },
     async listFacts(type: EntityType, ids: string[]) { return store.facts.filter((fact) => fact.entityType === type && ids.includes(fact.entityId)) },
+    // Latest row per domain wins, like ReplacingMergeTree FINAL.
+    async findCompaniesByDomain(domains: string[]) {
+      return domains.flatMap((domain) => store.companies.filter((company) => company.domain === domain).slice(-1))
+    },
+    async companiesWithoutLei(limit: number) {
+      const latest = new Map(store.companies.map((company) => [company.domain, company]))
+      return [...latest.values()].filter((company) => !company.lei && company.legalName).slice(0, limit)
+    },
     async insertSuppression(entries: SuppressionEntry[]) { store.suppression.push(...entries) },
     async findSuppressed(kind: SuppressionKind, hashes: string[]) {
       return new Set(store.suppression.filter((entry) => entry.kind === kind && hashes.includes(entry.valueHash)).map((entry) => entry.valueHash))

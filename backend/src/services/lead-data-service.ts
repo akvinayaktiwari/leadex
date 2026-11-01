@@ -5,6 +5,8 @@ import { employeeBandsBetween } from '../lib/employee-bands.js'
 import { companyIdFor, normalizeLeadDomain, personKeyFor, suppressionHash } from '../lib/lead-keys.js'
 import type {
   Clock,
+  CompanyChanges,
+  CompanyEnrichment,
   CompanyFilters,
   CompanyRecord,
   CompanyWrite,
@@ -163,9 +165,37 @@ function createDeliveryMethods(deps: LeadDataServiceDeps): Pick<LeadDataService,
   }
 }
 
+// Fields the enrichment actually changes (and so must be sourced): populated changes that differ from the stored value.
+function changedFields(current: CompanyRecord, changes: CompanyChanges): string[] {
+  const differs = (field: keyof CompanyChanges): boolean => JSON.stringify(changes[field]) !== JSON.stringify(current[field])
+  const changed = Object.fromEntries((Object.keys(changes) as (keyof CompanyChanges)[]).filter(differs).map((field) => [field, changes[field]]))
+  return populatedFields(changed, [])
+}
+
+function createEnrichMethods(deps: LeadDataServiceDeps): Pick<LeadDataService, 'enrichCompany' | 'companiesWithoutLei'> {
+  const { repository, clock } = deps
+  return {
+    async enrichCompany(enrichment: CompanyEnrichment): Promise<WriteOutcome> {
+      const domain = normalizeLeadDomain(enrichment.domain)
+      const [current] = await repository.findCompaniesByDomain([domain])
+      if (!current) return { status: 'not_found', entityId: companyIdFor(domain) }
+      const label = `Company ${domain}`
+      const country = enrichment.changes.country === undefined ? current.country : normalizeCountry(enrichment.changes.country) ?? enrichment.changes.country
+      assertAllowedCountry(label, country)
+      assertProvenance(label, changedFields(current, enrichment.changes), enrichment.facts.map((fact) => fact.field))
+      if (await isSuppressed(repository, 'domain', [domain])) return { status: 'suppressed', entityId: current.companyId }
+      await repository.insertFacts(toFacts('company', current.companyId, enrichment.facts))
+      await repository.insertCompanies([{ ...current, ...enrichment.changes, country, domain, companyId: current.companyId, updatedAt: clock.now().toISOString() }])
+      return { status: 'saved', entityId: current.companyId }
+    },
+    companiesWithoutLei: (limit) => repository.companiesWithoutLei(clampLimit(limit)),
+  }
+}
+
 export function createLeadDataService(deps: LeadDataServiceDeps): LeadDataService {
   return {
     ...createWriteMethods(deps),
+    ...createEnrichMethods(deps),
     ...createSearchMethods(deps),
     ...createDeliveryMethods(deps),
     async suppress(kind: SuppressionKind, value: string, reason: SuppressionReason): Promise<void> {
