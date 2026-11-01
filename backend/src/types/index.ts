@@ -668,3 +668,34 @@ export interface LlmPrices {
   inputUsdPerMillion: number
   outputUsdPerMillion: number
 }
+
+// ---- GLEIF legal entities (#22 part 3) ----
+
+export interface GleifRecord {
+  lei: string
+  legalName: string
+  otherNames: string[]
+  legalCountry: string
+  legalCity: string
+  hqCountry: string
+  hqCity: string
+  jurisdiction: string
+  category: string
+  legalForm: string
+  entityStatus: string
+  registrationStatus: string
+}
+
+export interface GleifPublish {
+  publishDate: string
+  fullCsvUrl: string
+  fullRecords: number
+  // Changes published in the last day; applied daily after the full file.
+  lastDayCsvUrl: string
+}
+
+export interface GleifSource {
+  latestPublish(): Promise<GleifPublish>
+  // Streams records from a golden-copy CSV zip. Breaking out of the loop stops the download.
+  streamRecords(zipUrl: string): AsyncIterable<GleifRecord>
+}
