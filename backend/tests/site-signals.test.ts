@@ -32,17 +32,22 @@ describe('site signals', () => {
     expect(signals.organization).toEqual({ name: 'Acme', legalName: 'Acme Pvt Ltd', telephone: '+91 80 1234', country: 'IN', region: 'KA', city: 'Bengaluru', foundingDate: undefined })
   })
 
-  // protects=an agency credit is recorded only from footer wording ("Website by" 0.9, bare "by" 0.75), never for
-  // platforms, the site's own links or unlabelled links;
-  // fails_when="Powered by Shopify" becomes an agency, a footer "Privacy" link becomes an agency, or the credit is missed;
+  // protects=an agency is recorded only from explicit design/build wording in the footer, never from platform,
+  // ownership or "powered by" lines, the site's own links, or unlabelled links;
+  // fails_when="Powered by Shopify", "operated by Informa TechTarget" or "Powered by iNaturalist open source software"
+  // (both seen on real sites, 2026-11-01) becomes an agency, or a real "Website by" credit is missed;
   // no_claim=English wording only.
-  it('finds agency credits by wording', () => {
+  it('finds agency credits only from explicit wording', () => {
     const credited = page('', '<footer><p>© Acme. Website by <a href="https://pixelworks.studio">Pixelworks</a></p></footer>')
     expect(readPageSignals(credited, 'https://acme.com/', []).agency).toEqual({ name: 'Pixelworks', url: 'https://pixelworks.studio', confidence: 0.9 })
-    const bare = page('', '<div class="site-footer"><span>by <a href="https://studio9.in">Studio9</a></span></div>')
-    expect(readPageSignals(bare, 'https://acme.com/', []).agency?.confidence).toBe(0.75)
-    const notAgency = page('', '<footer>Powered by <a href="https://shopify.com">Shopify</a> <a href="https://acme.com/privacy">Privacy</a> <a href="https://x.com/acme">X</a></footer>')
-    expect(readPageSignals(notAgency, 'https://acme.com/', []).agency).toBeUndefined()
+    const designed = page('', '<div class="site-footer"><span>Design & development by <a href="https://studio9.in">Studio9</a></span></div>')
+    expect(readPageSignals(designed, 'https://acme.com/', []).agency?.name).toBe('Studio9')
+    for (const footer of [
+      'Powered by <a href="https://shopify.com">Shopify</a> <a href="https://acme.com/privacy">Privacy</a> <a href="https://x.com/acme">X</a>',
+      'TechTarget is operated by <a href="https://informatechtarget.com">Informa TechTarget</a>',
+      'Powered by <a href="https://github.com/inaturalist">iNaturalist open source software</a>',
+      'Acme is a part of <a href="https://bigco.com">BigCo Group</a>. Made with care by our team.',
+    ]) expect(readPageSignals(page('', `<footer>${footer}</footer>`), 'https://acme.com/', []).agency, footer).toBeUndefined()
   })
 
   // protects=public job boards linked from the site are found once each, with provider and board id;

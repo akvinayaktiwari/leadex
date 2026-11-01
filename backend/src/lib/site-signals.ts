@@ -84,18 +84,20 @@ export function readOrganization($: CheerioAPI): { organization?: StructuredOrga
   return { hasStructuredData: nodes.length > 0, ...(organization ? { organization: toOrganization(organization) } : {}) }
 }
 
-const EXPLICIT_CREDIT = /\b(website|site|web design|designed|developed|built|made|crafted)\s+(and\s+\w+\s+)?by\s*:?\s*$/i
-const BARE_CREDIT = /\b(by|agency)\s*:?\s*$/i
+// Only wording that credits the site's design or build. Ownership and platform lines ("operated by",
+// "a part of", "powered by") are not agency credits: a wrong incumbent in an email is worse than none.
+const EXPLICIT_CREDIT = /\b(website|site|web\s*site|web design|website design|designed|developed|built|made|crafted|design and development|design & development)\s+(and\s+\w+\s+)?by\s*:?\s*$/i
+const NOT_A_CREDIT = /\b(operated|owned|published|part of|powered|hosted|licensed|sponsored|supported|brought to you)\b/i
 // Credits to platforms are not agencies.
 const PLATFORM_CREDIT = /^(wordpress|shopify|wix|squarespace|webflow|godaddy|weebly|jimdo|hubspot|ghost|framer)$/i
+const AGENCY_CONFIDENCE = 0.9
 
-function creditFor(precedingText: string): number {
-  if (EXPLICIT_CREDIT.test(precedingText)) return 0.9
-  if (BARE_CREDIT.test(precedingText)) return 0.75
-  return 0
+function isCredit(precedingText: string): boolean {
+  const lastClause = precedingText.split(/[.|·•©]/).pop() ?? ''
+  return EXPLICIT_CREDIT.test(lastClause.trim()) && !NOT_A_CREDIT.test(lastClause)
 }
 
-// A link in the footer credited with "Website by …" (0.9) or a bare "by …" (0.75). Unlabelled links are not credits.
+// A footer link credited with explicit design/build wording ("Website by …"). Anything weaker is not recorded.
 export function findAgencyCredit($: CheerioAPI, pageUrl: string): AgencyCredit | undefined {
   const pageHost = new URL(pageUrl).hostname.replace(/^www\./, '')
   for (const element of $('footer a[href], [class*="footer"] a[href], [id*="footer"] a[href]').toArray()) {
@@ -105,9 +107,8 @@ export function findAgencyCredit($: CheerioAPI, pageUrl: string): AgencyCredit |
     if (!name || name.length > 60 || PLATFORM_CREDIT.test(name) || !URL.canParse(href, pageUrl)) continue
     const target = new URL(href, pageUrl)
     if (target.hostname.replace(/^www\./, '') === pageHost) continue
-    const preceding = link.parent().text().split(name)[0] ?? ''
-    const confidence = creditFor(preceding.replace(/\s+/g, ' ').trim())
-    if (confidence >= 0.75) return { name, url: target.origin, confidence }
+    const preceding = (link.parent().text().split(name)[0] ?? '').replace(/\s+/g, ' ').trim()
+    if (isCredit(preceding)) return { name, url: target.origin, confidence: AGENCY_CONFIDENCE }
   }
   return undefined
 }

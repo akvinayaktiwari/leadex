@@ -600,7 +600,7 @@ export interface StructuredOrganization {
 export interface AgencyCredit {
   name: string
   url?: string | undefined
-  // 0.9 for an explicit "Website by …", 0.75 for a bare descriptive credit. Lower ones are not recorded.
+  // Only explicit design/build credits ("Website by …") are recorded, at 0.9.
   confidence: number
 }
 
