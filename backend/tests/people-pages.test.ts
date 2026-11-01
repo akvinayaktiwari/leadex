@@ -19,4 +19,13 @@ describe('people page crawl', () => {
     expect(crawled.pages.map((page) => page.path)).toEqual(['/', '/our-team', '/leadership', '/team/asha', '/team/ravi', '/meet-the-dentists', '/about'])
     expect(site.requested.some((url) => /pricing|blog/.test(url))).toBe(false)
   })
+
+  // protects=people-page patterns match whole path segments only;
+  // fails_when="/company-news" (seen on a real site, 2026-11-01) or "/about-our-products" is read as a people page;
+  // no_claim=n/a.
+  it('matches whole path segments', () => {
+    const matches = (path: string): boolean => PEOPLE_CRAWL.priorityPaths.some((pattern) => pattern.test(path))
+    for (const path of ['/about', '/about-us/', '/our-team/', '/team/asha', '/meet-the-dentists', '/contact.php', '/leadership']) expect(matches(path), path).toBe(true)
+    for (const path of ['/company-news', '/about-our-products', '/teamwork-blog', '/contacts-import', '/pricing']) expect(matches(path), path).toBe(false)
+  })
 })
