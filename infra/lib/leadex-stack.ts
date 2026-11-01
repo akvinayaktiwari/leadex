@@ -26,6 +26,11 @@ export interface LeadexStackProps extends StackProps {
   // Common Crawl domain-ranks file of the release to import, and how many domains to keep from it.
   ccDomainRanksUrl?: string
   ingestCcMaxDomains?: number
+  // Company profiler: domains per daily run (0 = off, the default) and parallel crawls.
+  profileMaxPerRun?: number
+  profileConcurrency?: number
+  // Optional USD per million input/output tokens of the fast model, for cost logging.
+  llmFastPrices?: { input: number; output: number }
 }
 
 // ClickHouse Cloud is managed outside CDK; its connection details live in the stage's app secret.
@@ -210,10 +215,26 @@ export class LeadexStack extends Stack {
   }
 
   // Daily Leadex Data imports (registries, open data). Runs once per schedule and exits.
+  private ingestEnvironment(props: LeadexStackProps, ingestEnabled: boolean): Record<string, string> {
+    return {
+      STAGE: props.stage,
+      INGEST_ENABLED: String(ingestEnabled),
+      CLICKHOUSE_DATABASE: `leadex_${props.stage}`,
+      ...(props.sentryDsn ? { SENTRY_DSN: props.sentryDsn } : {}),
+      ...(props.ccDomainRanksUrl ? { CC_DOMAIN_RANKS_URL: props.ccDomainRanksUrl } : {}),
+      ...(props.ingestCcMaxDomains ? { INGEST_CC_MAX_DOMAINS: String(props.ingestCcMaxDomains) } : {}),
+      INGEST_PROFILE_MAX_PER_RUN: String(props.profileMaxPerRun ?? 0),
+      ...(props.profileConcurrency ? { INGEST_PROFILE_CONCURRENCY: String(props.profileConcurrency) } : {}),
+      LLM_MODEL_FAST: props.llmModels.fast,
+      FRONTEND_URL: props.frontendUrl,
+      ...(props.llmFastPrices ? { LLM_FAST_INPUT_USD_PER_MTOK: String(props.llmFastPrices.input), LLM_FAST_OUTPUT_USD_PER_MTOK: String(props.llmFastPrices.output) } : {}),
+    }
+  }
+
   private createIngestTask(props: LeadexStackProps, shared: WorkerShared): void {
     const ingestEnabled = props.ingestEnabled ?? false
     const secrets = Object.fromEntries(
-      CLICKHOUSE_SECRET_KEYS.map((name) => [name, ecs.Secret.fromSecretsManager(shared.appSecret, name)]),
+      [...CLICKHOUSE_SECRET_KEYS, 'ANTHROPIC_API_KEY'].map((name) => [name, ecs.Secret.fromSecretsManager(shared.appSecret, name)]),
     )
     const cluster = new ecs.Cluster(this, 'IngestCluster', { vpc: shared.vpc })
     new ecsPatterns.ScheduledFargateTask(this, 'Ingest', {
@@ -227,14 +248,7 @@ export class LeadexStack extends Stack {
         command: ['node', 'ingest.mjs'],
         cpu: 512,
         memoryLimitMiB: 2048,
-        environment: {
-          STAGE: props.stage,
-          INGEST_ENABLED: String(ingestEnabled),
-          CLICKHOUSE_DATABASE: `leadex_${props.stage}`,
-          ...(props.sentryDsn ? { SENTRY_DSN: props.sentryDsn } : {}),
-          ...(props.ccDomainRanksUrl ? { CC_DOMAIN_RANKS_URL: props.ccDomainRanksUrl } : {}),
-          ...(props.ingestCcMaxDomains ? { INGEST_CC_MAX_DOMAINS: String(props.ingestCcMaxDomains) } : {}),
-        },
+        environment: this.ingestEnvironment(props, ingestEnabled),
         secrets,
       },
     })
