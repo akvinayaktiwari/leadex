@@ -186,3 +186,16 @@ describe('lead data service: enrichment', () => {
     expect(await service.enrichCompany({ domain: 'acme.com', changes: { lei: 'LEI1' }, facts: [registryFact('lei', 'LEI1')] })).toMatchObject({ status: 'suppressed' })
   })
 })
+
+describe('lead data service: email suppression', () => {
+  // protects=an address suppressed itself, or whose domain is suppressed, is never stored; case does not matter;
+  // fails_when=a removal request for jane@acme.com still lets "Jane@Acme.com" be stored, or a suppressed domain's info@ is kept;
+  // no_claim=n/a.
+  it('filters suppressed emails and domains', async () => {
+    const { service } = setup()
+    await service.suppress('email', 'Jane@Acme.com', 'removal_request')
+    await service.suppress('domain', 'blocked.com', 'opt_out')
+    const allowed = await service.allowedEmails(['jane@acme.com', 'ravi@acme.com', 'info@blocked.com'])
+    expect([...allowed]).toEqual(['ravi@acme.com'])
+  })
+})

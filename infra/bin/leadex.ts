@@ -33,6 +33,8 @@ new LeadexStack(app, `Leadex-${stage}`, {
   ...(process.env.LLM_FAST_INPUT_USD_PER_MTOK && process.env.LLM_FAST_OUTPUT_USD_PER_MTOK
     ? { llmFastPrices: { input: Number(process.env.LLM_FAST_INPUT_USD_PER_MTOK), output: Number(process.env.LLM_FAST_OUTPUT_USD_PER_MTOK) } }
     : {}),
+  ...(process.env.INGEST_PEOPLE_MAX_PER_RUN ? { peopleMaxPerRun: Number(process.env.INGEST_PEOPLE_MAX_PER_RUN) } : {}),
+  ...(process.env.INGEST_PEOPLE_CONCURRENCY ? { peopleConcurrency: Number(process.env.INGEST_PEOPLE_CONCURRENCY) } : {}),
   ...(process.env.GLEIF_API_URL && process.env.GLEIF_RECORD_URL_BASE
     ? { gleif: {
         apiUrl: process.env.GLEIF_API_URL, recordUrlBase: process.env.GLEIF_RECORD_URL_BASE,

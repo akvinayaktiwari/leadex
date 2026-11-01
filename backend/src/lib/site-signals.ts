@@ -1,7 +1,8 @@
 // Deterministic signals read from a page's raw HTML: no extra requests, no model call.
 import { load, type CheerioAPI } from 'cheerio'
-import type { AgencyCredit, JobBoardLink, JobBoardProvider, PageSignals, StructuredOrganization, TechnologyName } from '../types/index.js'
+import type { AgencyCredit, JobBoardLink, JobBoardProvider, PageSignals, StructuredOrganization, StructuredPerson, TechnologyName } from '../types/index.js'
 import { normalizeCountry } from './countries.js'
+import { findPublishedEmails } from './published-emails.js'
 
 const TECHNOLOGY_PATTERNS: [TechnologyName, RegExp][] = [
   ['google_analytics', /google-analytics\.com\/(analytics|ga)\.js|gtag\/js\?id=G-/i],
@@ -74,14 +75,32 @@ function parseJsonLd(raw: string): JsonValue | undefined {
   }
 }
 
-export function readOrganization($: CheerioAPI): { organization?: StructuredOrganization; hasStructuredData: boolean } {
+const PEOPLE_PROPERTIES = ['founder', 'founders', 'employee', 'employees', 'member', 'members'] as const
+
+// The organization's own founder/employee entries only; a blog post's author or a review's author is not staff.
+function structuredPeople(organization: JsonObject): StructuredPerson[] {
+  const found = new Map<string, StructuredPerson>()
+  for (const property of PEOPLE_PROPERTIES) {
+    const value = organization[property]
+    for (const node of Array.isArray(value) ? value : [value]) {
+      const name = isObject(node) ? text(node.name) : text(node ?? undefined)
+      if (!name || found.has(name)) continue
+      const title = isObject(node) ? text(node.jobTitle) : undefined
+      found.set(name, { name, title: title ?? (property.startsWith('founder') ? 'Founder' : undefined) })
+    }
+  }
+  return [...found.values()]
+}
+
+export function readOrganization($: CheerioAPI): { organization?: StructuredOrganization; people: StructuredPerson[]; hasStructuredData: boolean } {
   const blocks = $('script[type="application/ld+json"]').map((_, el) => $(el).text()).get()
   const nodes = blocks.flatMap((raw) => {
     const parsed = parseJsonLd(raw)
     return parsed === undefined ? [] : flattenNodes(parsed)
   })
   const organization = nodes.find(hasOrganizationType)
-  return { hasStructuredData: nodes.length > 0, ...(organization ? { organization: toOrganization(organization) } : {}) }
+  const people = organization ? structuredPeople(organization) : []
+  return { hasStructuredData: nodes.length > 0, people, ...(organization ? { organization: toOrganization(organization) } : {}) }
 }
 
 // Only wording that credits the site's design or build. Ownership and platform lines ("operated by",
@@ -133,11 +152,13 @@ export function findJobBoards(links: string[]): JobBoardLink[] {
 
 export function readPageSignals(html: string, pageUrl: string, links: string[]): PageSignals {
   const $ = load(html)
-  const { organization, hasStructuredData } = readOrganization($)
+  const { organization, people, hasStructuredData } = readOrganization($)
   const agency = findAgencyCredit($, pageUrl)
   return {
     technologies: detectTechnologies(html),
     hasStructuredData,
+    people,
+    emails: findPublishedEmails(html, new URL(pageUrl).hostname.replace(/^www\./, '')),
     ...(organization ? { organization } : {}),
     ...(agency ? { agency } : {}),
     jobBoards: findJobBoards(links),

@@ -341,6 +341,9 @@ export interface IngestEnv extends LeadDataEnv {
   // Public page for one LEI (the LEI is appended); required with GLEIF_API_URL.
   GLEIF_RECORD_URL_BASE?: string | undefined
   INGEST_GLEIF_MATCH_PER_RUN: number
+  // People from company websites: 0 (the default) turns it off; above 0 needs the model settings.
+  INGEST_PEOPLE_MAX_PER_RUN: number
+  INGEST_PEOPLE_CONCURRENCY: number
 }
 
 export type EntityType = 'company' | 'person'
@@ -356,7 +359,8 @@ export type FactSource =
   | 'web_data_commons'
   | 'pdl'
 
-export type FactMethod = 'registry' | 'structured_data' | 'page_extract' | 'vendor'
+// 'derived': inferred from another stored fact (e.g. a person's country from their company's country).
+export type FactMethod = 'registry' | 'structured_data' | 'page_extract' | 'vendor' | 'derived'
 
 // How far we may keep and reuse a fact: our own extraction, an open-data licence,
 // an official public record, or a vendor's licence terms.
@@ -533,6 +537,8 @@ export interface LeadDataService {
   loadDeliverableCompanies(companies: CompanyRecord[]): Promise<DeliverableCompany[]>
   loadDeliverablePeople(people: PersonRecord[]): Promise<DeliverablePerson[]>
   suppress(kind: SuppressionKind, value: string, reason: SuppressionReason): Promise<void>
+  // The subset of the given addresses that may be stored: not suppressed by email or by their domain.
+  allowedEmails(emails: string[]): Promise<Set<string>>
 }
 
 export interface IngestJobResult {
@@ -625,12 +631,28 @@ export interface AgencyCredit {
   confidence: number
 }
 
+// A person the business lists as its own founder or employee in schema.org markup.
+export interface StructuredPerson {
+  name: string
+  title?: string | undefined
+}
+
+export type EmailKind = 'personal' | 'general'
+
+export interface FoundEmail {
+  email: string
+  kind: EmailKind
+}
+
 export interface PageSignals {
   technologies: TechnologyName[]
   organization?: StructuredOrganization | undefined
   hasStructuredData: boolean
   agency?: AgencyCredit | undefined
   jobBoards: JobBoardLink[]
+  people: StructuredPerson[]
+  // Addresses on the site's own domain published on this page.
+  emails: FoundEmail[]
 }
 
 export interface ProfileCandidate {
@@ -757,4 +779,68 @@ export interface LegalMatchSummary {
   matched: number
   noMatch: number
   ambiguous: number
+}
+
+// ---- People from company websites (#23 part 1) ----
+
+export type PersonRejection = 'not_current' | 'not_a_name' | 'no_title' | 'unsourced' | 'duplicate'
+
+export interface PublishedEmailRow {
+  domain: string
+  email: string
+  kind: EmailKind
+  // The named person the address belongs to, or '' when it is not tied to one.
+  personKey: string
+  sourceUrl: string
+  seenAt: string
+}
+
+export interface PeopleDecision {
+  writes: PersonWrite[]
+  rejected: Partial<Record<PersonRejection, number>>
+  emails: PublishedEmailRow[]
+}
+
+export type PeopleOutcome = 'done' | 'skipped' | 'failed'
+
+export interface PeopleStatusEntry {
+  domain: string
+  status: PeopleOutcome
+  reason: string
+  peopleFound: number
+  attempts: number
+  checkedAt: string
+}
+
+export interface PeopleCandidate {
+  company: CompanyRecord
+  attempts: number
+}
+
+export interface PeopleSelection {
+  limit: number
+  excludedCountries: string[]
+  maxAttempts: number
+  retryFailedBefore: string
+  refreshBefore: string
+}
+
+export interface PeopleExtractionRepository {
+  // Profiled companies never read for people, failed fewer than maxAttempts times and not recently, or due a refresh.
+  nextCompanies(selection: PeopleSelection): Promise<PeopleCandidate[]>
+  recordStatus(entries: PeopleStatusEntry[]): Promise<void>
+  insertPublishedEmails(rows: PublishedEmailRow[]): Promise<void>
+  listPublishedEmails(domain: string): Promise<PublishedEmailRow[]>
+}
+
+export interface PeopleBatchSummary {
+  attempted: number
+  done: number
+  skipped: Partial<Record<string, number>>
+  failed: Partial<Record<string, number>>
+  peopleSaved: number
+  peopleRejected: Partial<Record<PersonRejection | 'suppressed' | 'invalid', number>>
+  emailsStored: number
+  usage: ProfilerUsage
+  costUsd?: number | undefined
 }

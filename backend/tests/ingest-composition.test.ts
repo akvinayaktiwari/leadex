@@ -24,11 +24,12 @@ describe('ingest composition', () => {
   it('requires model settings only when the profiler is on', () => {
     expect(getIngestEnv(BASE).INGEST_PROFILE_MAX_PER_RUN).toBe(0)
     expect(() => getIngestEnv({ ...BASE, INGEST_PROFILE_MAX_PER_RUN: '500' })).toThrow(/ANTHROPIC_API_KEY, LLM_MODEL_FAST, FRONTEND_URL/)
+    expect(() => getIngestEnv({ ...BASE, INGEST_PEOPLE_MAX_PER_RUN: '50' })).toThrow(/ANTHROPIC_API_KEY, LLM_MODEL_FAST, FRONTEND_URL/)
     expect(getIngestEnv({ ...BASE, ...PROFILER })).toMatchObject({ INGEST_PROFILE_MAX_PER_RUN: 500, INGEST_PROFILE_CONCURRENCY: 8 })
     expect(() => getIngestEnv({ ...BASE, GLEIF_API_URL: GLEIF.GLEIF_API_URL })).toThrow(/GLEIF_RECORD_URL_BASE/)
   })
 
-  // protects=jobs register only when configured, in order: domain import, profiler, GLEIF import, GLEIF matching;
+  // protects=jobs register only when configured, in order: domain import, profiler, people, GLEIF import, GLEIF matching;
   // fails_when=the profiler runs before new domains are imported, matching runs before the registry is refreshed or
   // before new companies exist, or a job runs with no configuration;
   // no_claim=does not run the jobs.
@@ -38,5 +39,8 @@ describe('ingest composition', () => {
     expect(await jobNames({ ...BASE, ...RANKS, ...PROFILER })).toEqual(['common_crawl_domains', 'company_profiler'])
     expect(await jobNames({ ...BASE, ...RANKS, ...PROFILER, ...GLEIF })).toEqual(['common_crawl_domains', 'company_profiler', 'gleif_import', 'gleif_match'])
     expect(await jobNames({ ...BASE, ...GLEIF })).toEqual(['gleif_import', 'gleif_match'])
+    const people = { ...PROFILER, INGEST_PEOPLE_MAX_PER_RUN: '300' }
+    expect(await jobNames({ ...BASE, ...RANKS, ...people, ...GLEIF })).toEqual(['common_crawl_domains', 'company_profiler', 'people_extractor', 'gleif_import', 'gleif_match'])
+    expect(await jobNames({ ...BASE, ...PROFILER, INGEST_PROFILE_MAX_PER_RUN: '0', INGEST_PEOPLE_MAX_PER_RUN: '300' })).toEqual(['people_extractor'])
   })
 })

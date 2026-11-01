@@ -59,4 +59,21 @@ describe('site signals', () => {
       'https://jobs.lever.co/acme', 'https://jobs.ashbyhq.com/Acme', 'https://apply.workable.com/acme-1/', 'https://acme.com/careers',
     ]).map((board) => `${board.provider}:${board.board}`)).toEqual(['greenhouse:acme', 'greenhouse:acmeeu', 'lever:acme', 'ashby:acme', 'workable:acme-1'])
   })
+
+  // protects=people come only from the organization's own founder/employee entries, and page emails are collected;
+  // fails_when=a blog post's author or a review's author becomes staff, or a founder listed by name only is dropped;
+  // no_claim=does not verify the markup is current.
+  it('reads founders and employees from the organization markup', () => {
+    const jsonLd = JSON.stringify([
+      { '@type': 'Organization', name: 'Acme', founder: [{ '@type': 'Person', name: 'Asha Rao' }, 'Ravi Kumar'],
+        employee: { '@type': 'Person', name: 'Priya Shah', jobTitle: 'Head of Marketing' } },
+      { '@type': 'BlogPosting', author: { '@type': 'Person', name: 'Guest Writer' } },
+    ])
+    const html = page(`<script type="application/ld+json">${jsonLd}</script>`, '<a href="mailto:asha@acme.com">Email Asha</a>')
+    const signals = readPageSignals(html, 'https://www.acme.com/about', [])
+    expect(signals.people).toEqual([
+      { name: 'Asha Rao', title: 'Founder' }, { name: 'Ravi Kumar', title: 'Founder' }, { name: 'Priya Shah', title: 'Head of Marketing' },
+    ])
+    expect(signals.emails).toEqual([{ email: 'asha@acme.com', kind: 'personal' }])
+  })
 })

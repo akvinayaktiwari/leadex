@@ -113,7 +113,7 @@ describe('LeadexStack', () => {
   })
 
   // protects=the daily ingest schedule exists but is disabled unless ingestEnabled is set, runs ingest.mjs on the worker image,
-  // and the company profiler is off (INGEST_PROFILE_MAX_PER_RUN=0) unless set;
+  // and the company profiler and people extractor are off (…_MAX_PER_RUN=0) unless set;
   // fails_when=imports or paid model calls start on first deploy, or the task runs the queue worker instead;
   // no_claim=does not run the task or check that ClickHouse is reachable.
   it('schedules the ingest task, disabled by default', () => {
@@ -127,6 +127,7 @@ describe('LeadexStack', () => {
     expect(new Map(ingest.Environment.map((entry) => [entry.Name, entry.Value]))).toEqual(new Map([
       ['STAGE', 'dev'], ['INGEST_ENABLED', 'false'], ['CLICKHOUSE_DATABASE', 'leadex_dev'],
       ['INGEST_PROFILE_MAX_PER_RUN', '0'], ['LLM_MODEL_FAST', 'claude-opus-5-5'], ['FRONTEND_URL', 'http://localhost:3000'],
+      ['INGEST_PEOPLE_MAX_PER_RUN', '0'],
     ]))
   })
 
@@ -142,7 +143,7 @@ describe('LeadexStack', () => {
     }
   })
 
-  // protects=turning ingest on flips both the schedule and the container flag together, and the Common Crawl, profiler and GLEIF settings reach the task;
+  // protects=turning ingest on flips both the schedule and the container flag together, and the Common Crawl, profiler, people and GLEIF settings reach the task;
   // fails_when=the rule is enabled but the container still says false (silent no-op), or the ranks URL / max are dropped;
   // no_claim=n/a.
   it('enables schedule and flag together', () => {
@@ -153,6 +154,7 @@ describe('LeadexStack', () => {
       ccDomainRanksUrl: 'https://data.commoncrawl.org/projects/hyperlinkgraph/cc-main-2026-apr-may-jun/domain/r.txt.gz', ingestCcMaxDomains: 500000,
       profileMaxPerRun: 1000, profileConcurrency: 6, llmFastPrices: { input: 1, output: 5 },
       gleif: { apiUrl: 'https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest', recordUrlBase: 'https://search.gleif.org/#/record/', matchPerRun: 2000 },
+      peopleMaxPerRun: 300, peopleConcurrency: 4,
       env: { account: '111111111111', region: 'ap-south-1' },
     })
     const enabled = Template.fromStack(stack)
@@ -163,6 +165,7 @@ describe('LeadexStack', () => {
     expect(environment.get('INGEST_CC_MAX_DOMAINS')).toBe('500000')
     expect([environment.get('INGEST_PROFILE_MAX_PER_RUN'), environment.get('INGEST_PROFILE_CONCURRENCY')]).toEqual(['1000', '6'])
     expect([environment.get('LLM_FAST_INPUT_USD_PER_MTOK'), environment.get('LLM_FAST_OUTPUT_USD_PER_MTOK')]).toEqual(['1', '5'])
+    expect([environment.get('INGEST_PEOPLE_MAX_PER_RUN'), environment.get('INGEST_PEOPLE_CONCURRENCY')]).toEqual(['300', '4'])
     expect([environment.get('GLEIF_API_URL'), environment.get('GLEIF_RECORD_URL_BASE'), environment.get('INGEST_GLEIF_MATCH_PER_RUN')])
       .toEqual(['https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest', 'https://search.gleif.org/#/record/', '2000'])
   })
