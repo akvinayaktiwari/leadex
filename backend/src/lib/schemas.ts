@@ -103,3 +103,15 @@ export const peopleDraftSchema = z.object({
 })
 
 export type PeopleDraft = z.infer<typeof peopleDraftSchema>
+
+// What the model returns for the competitors step (#5). Countries are checked against each competitor's own site.
+export const competitorsDraftSchema = z.object({
+  competitors: z.array(z.object({
+    domain: z.string().min(3).max(253),
+    name: z.string().min(1).max(80),
+    reason: z.string().min(1).max(160),
+    hqCountry: z.string().regex(/^([A-Z]{2}|UNKNOWN)$/, 'Use an ISO-3166 alpha-2 code or "UNKNOWN"'),
+  })).max(20),
+})
+
+export type CompetitorsDraft = z.infer<typeof competitorsDraftSchema>
