@@ -321,6 +321,9 @@ export interface IngestEnv extends LeadDataEnv {
   STAGE: Stage
   INGEST_ENABLED: boolean
   SENTRY_DSN?: string | undefined
+  // Common Crawl domain-level ranks file for the release to import; the job is skipped when unset.
+  CC_DOMAIN_RANKS_URL?: string | undefined
+  INGEST_CC_MAX_DOMAINS: number
 }
 
 export type EntityType = 'company' | 'person'
@@ -513,4 +516,42 @@ export type IngestJobOutcome =
 export interface IngestSummary {
   enabled: boolean
   outcomes: IngestJobOutcome[]
+}
+
+// ---- Company discovery from open data (#22) ----
+
+// One line of the Common Crawl domain-ranks file, parsed.
+export interface DomainRankLine {
+  harmonicRank: number
+  harmonicValue: number
+  pagerankRank: number
+  reversedDomain: string
+  hosts: number
+}
+
+export interface DomainCandidate {
+  domain: string
+  tld: string
+  harmonicRank: number
+  harmonicValue: number
+  pagerankRank: number
+  hosts: number
+  release: string
+  importedAt: string
+}
+
+export interface DomainRanksSource {
+  // Streams parsed lines in file order (best-linked first). Breaking out of the loop closes the download.
+  streamDomainRanks(url: string): AsyncIterable<DomainRankLine>
+}
+
+export interface DomainCandidatesRepository {
+  insertCandidates(candidates: DomainCandidate[]): Promise<void>
+  countForRelease(release: string): Promise<number>
+}
+
+export interface DomainImportOptions {
+  url: string
+  maxDomains: number
+  batchSize: number
 }

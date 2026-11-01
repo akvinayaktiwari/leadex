@@ -23,6 +23,9 @@ export interface LeadexStackProps extends StackProps {
   sentryDsn?: string
   // Turns on the daily Leadex Data import schedule. Off by default; sources land in #22/#23.
   ingestEnabled?: boolean
+  // Common Crawl domain-ranks file of the release to import, and how many domains to keep from it.
+  ccDomainRanksUrl?: string
+  ingestCcMaxDomains?: number
 }
 
 // ClickHouse Cloud is managed outside CDK; its connection details live in the stage's app secret.
@@ -229,6 +232,8 @@ export class LeadexStack extends Stack {
           INGEST_ENABLED: String(ingestEnabled),
           CLICKHOUSE_DATABASE: `leadex_${props.stage}`,
           ...(props.sentryDsn ? { SENTRY_DSN: props.sentryDsn } : {}),
+          ...(props.ccDomainRanksUrl ? { CC_DOMAIN_RANKS_URL: props.ccDomainRanksUrl } : {}),
+          ...(props.ingestCcMaxDomains ? { INGEST_CC_MAX_DOMAINS: String(props.ingestCcMaxDomains) } : {}),
         },
         secrets,
       },

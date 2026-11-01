@@ -52,7 +52,7 @@ describe.runIf(URL_)('Leadex Data on ClickHouse', () => {
   const repository = createLeadDataRepository(client)
 
   beforeAll(async () => {
-    expect(await runMigrations(ENV)).toEqual(['001_leadex_data.sql'])
+    expect(await runMigrations(ENV)).toEqual(['001_leadex_data.sql', '002_domain_candidates.sql'])
   })
 
   afterAll(async () => {
