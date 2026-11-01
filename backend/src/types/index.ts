@@ -326,6 +326,16 @@ export interface IngestEnv extends LeadDataEnv {
   // Common Crawl domain-level ranks file for the release to import; the job is skipped when unset.
   CC_DOMAIN_RANKS_URL?: string | undefined
   INGEST_CC_MAX_DOMAINS: number
+  // Company profiler: 0 (the default) turns it off. When above 0, the model settings below are required.
+  INGEST_PROFILE_MAX_PER_RUN: number
+  INGEST_PROFILE_CONCURRENCY: number
+  ANTHROPIC_API_KEY?: string | undefined
+  LLM_MODEL_FAST?: string | undefined
+  // Used in the crawler's user agent so site owners can find out who we are.
+  FRONTEND_URL?: string | undefined
+  // Optional, for cost logging: USD per million input / output tokens of LLM_MODEL_FAST.
+  LLM_FAST_INPUT_USD_PER_MTOK?: number | undefined
+  LLM_FAST_OUTPUT_USD_PER_MTOK?: number | undefined
 }
 
 export type EntityType = 'company' | 'person'

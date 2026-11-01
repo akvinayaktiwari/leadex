@@ -39,6 +39,18 @@ const ingestEnvSchema = leadDataEnvSchema.extend({
   CC_DOMAIN_RANKS_URL: z.url().optional(),
   // How many domains (best-linked first, after filtering) to keep from one release.
   INGEST_CC_MAX_DOMAINS: z.coerce.number().int().min(1).max(130_000_000).default(2_000_000),
+  INGEST_PROFILE_MAX_PER_RUN: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  INGEST_PROFILE_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(8),
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  LLM_MODEL_FAST: z.string().min(1).optional(),
+  FRONTEND_URL: z.url().optional(),
+  LLM_FAST_INPUT_USD_PER_MTOK: z.coerce.number().min(0).optional(),
+  LLM_FAST_OUTPUT_USD_PER_MTOK: z.coerce.number().min(0).optional(),
+}).superRefine((env, context) => {
+  if (env.INGEST_PROFILE_MAX_PER_RUN === 0) return
+  for (const name of ['ANTHROPIC_API_KEY', 'LLM_MODEL_FAST', 'FRONTEND_URL'] as const) {
+    if (!env[name]) context.addIssue({ code: 'custom', path: [name], message: 'required when INGEST_PROFILE_MAX_PER_RUN > 0' })
+  }
 }) satisfies z.ZodType<IngestEnv, Record<string, unknown>>
 
 let cachedApiEnv: ApiEnv | undefined
