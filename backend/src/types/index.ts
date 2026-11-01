@@ -844,3 +844,35 @@ export interface PeopleBatchSummary {
   usage: ProfilerUsage
   costUsd?: number | undefined
 }
+
+// ---- Email finder (#24) ----
+
+export type VerificationStatus = 'valid' | 'invalid' | 'catch_all' | 'unknown'
+
+export interface VerificationResult {
+  email: string
+  status: VerificationStatus
+  // Provider's own reason, kept for logging and support.
+  reason: string
+  score?: number | undefined
+  // When the provider asks to retry later (greylisting).
+  retryAfter?: string | undefined
+}
+
+export interface EmailVerifier {
+  name: string
+  verify(email: string): Promise<VerificationResult>
+}
+
+export type MailProvider = 'google' | 'microsoft' | 'other'
+
+export interface DomainMail {
+  domain: string
+  // Lowest-preference MX host, or '' when the domain has no MX (it cannot receive mail).
+  mxHost: string
+  provider: MailProvider
+}
+
+export interface MailDnsRepository {
+  lookup(domain: string): Promise<DomainMail>
+}

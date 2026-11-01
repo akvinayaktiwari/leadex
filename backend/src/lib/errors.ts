@@ -27,3 +27,18 @@ export class LeadDataRuleError extends Error {
     this.name = 'LeadDataRuleError'
   }
 }
+
+// Verifier failures that stop a batch instead of failing one address.
+export class VerifierOutOfCredits extends Error {
+  constructor(verifier: string) {
+    super(`${verifier}: no verification credits left`)
+    this.name = 'VerifierOutOfCredits'
+  }
+}
+
+export class VerifierRateLimited extends Error {
+  constructor(verifier: string) {
+    super(`${verifier}: rate limited`)
+    this.name = 'VerifierRateLimited'
+  }
+}
