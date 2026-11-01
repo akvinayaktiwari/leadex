@@ -1,12 +1,6 @@
 // Finds email addresses a page publishes, including common anti-scraping encodings. Never invents an address.
 import { load } from 'cheerio'
-
-export type EmailKind = 'personal' | 'general'
-
-export interface FoundEmail {
-  email: string
-  kind: EmailKind
-}
+import type { FoundEmail } from '../types/index.js'
 
 // Role mailboxes: a company-level contact, not a person.
 const GENERAL_LOCAL_PARTS = new Set([

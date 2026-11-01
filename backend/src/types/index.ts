@@ -625,12 +625,28 @@ export interface AgencyCredit {
   confidence: number
 }
 
+// A person the business lists as its own founder or employee in schema.org markup.
+export interface StructuredPerson {
+  name: string
+  title?: string | undefined
+}
+
+export type EmailKind = 'personal' | 'general'
+
+export interface FoundEmail {
+  email: string
+  kind: EmailKind
+}
+
 export interface PageSignals {
   technologies: TechnologyName[]
   organization?: StructuredOrganization | undefined
   hasStructuredData: boolean
   agency?: AgencyCredit | undefined
   jobBoards: JobBoardLink[]
+  people: StructuredPerson[]
+  // Addresses on the site's own domain published on this page.
+  emails: FoundEmail[]
 }
 
 export interface ProfileCandidate {

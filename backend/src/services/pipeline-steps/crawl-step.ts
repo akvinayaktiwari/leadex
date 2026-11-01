@@ -6,9 +6,6 @@ import { readPageSignals } from '../../lib/site-signals.js'
 import type { AnalysisState, Clock, CrawledPage, CrawledSite, PipelineStep, SiteFetchRepository, StepContext } from '../../types/index.js'
 
 export const CRAWLER_AGENT_TOKEN = 'leadexbot'
-const MAX_EXTRA_PAGES = 10
-// Keeps one section (e.g. 20 case studies under /work/) from filling every slot.
-const MAX_PAGES_PER_SECTION = 3
 const MAX_TOTAL_TEXT_CHARS = 2_000_000
 const CRAWL_BUDGET_MS = 8_000
 const PAGE_TIMEOUT_MS = 5_000
@@ -17,11 +14,26 @@ const MIN_REMAINING_MS = 500
 // Below this the site is almost certainly rendered by JavaScript or empty.
 const MIN_SITE_TEXT_CHARS = 200
 
+export interface CrawlOptions {
+  // Path patterns, best first; a page's rank is the first pattern it matches.
+  priorityPaths: RegExp[]
+  maxExtraPages: number
+  // Keeps one section (e.g. 20 case studies under /work/) from filling every slot.
+  maxPagesPerSection: number
+  // When true, pages that match no pattern are never fetched.
+  onlyMatching: boolean
+}
+
 // Pages that say the most about what a business sells and to whom, best first.
-const PRIORITY_PATHS: RegExp[] = [
-  /pricing|plans/, /about|company|who-we-are/, /product|platform|features/, /solutions|use-cases|industries/,
-  /services|what-we-do/, /customers|case-stud|clients|work|portfolio/, /contact/,
-]
+export const ANALYSIS_CRAWL: CrawlOptions = {
+  priorityPaths: [
+    /pricing|plans/, /about|company|who-we-are/, /product|platform|features/, /solutions|use-cases|industries/,
+    /services|what-we-do/, /customers|case-stud|clients|work|portfolio/, /contact/,
+  ],
+  maxExtraPages: 10,
+  maxPagesPerSection: 3,
+  onlyMatching: false,
+}
 const SKIP_EXTENSIONS = /\.(pdf|png|jpe?g|gif|svg|webp|ico|zip|mp4|mp3|css|js|xml|json|txt)$/i
 
 export interface CrawlStepDeps {
@@ -63,13 +75,13 @@ async function fetchHomepage(deps: CrawlStepDeps, domain: string): Promise<Homep
   throw new PipelineError('site_unreachable', `We could not load ${domain}. Check the address and try again.`)
 }
 
-function priorityOf(path: string): number {
-  const index = PRIORITY_PATHS.findIndex((pattern) => pattern.test(path.toLowerCase()))
-  return index === -1 ? PRIORITY_PATHS.length : index
+function priorityOf(path: string, options: CrawlOptions): number {
+  const index = options.priorityPaths.findIndex((pattern) => pattern.test(path.toLowerCase()))
+  return index === -1 ? options.priorityPaths.length : index
 }
 
 // Same-site, robots-allowed content pages, one per path, highest priority first, nav order as tiebreak.
-function selectPages(homepage: Homepage): { urls: string[]; blockedByRobots: number } {
+function selectPages(homepage: Homepage, options: CrawlOptions): { urls: string[]; blockedByRobots: number } {
   const host = new URL(homepage.origin).hostname
   const byPath = new Map<string, string>()
   let blockedByRobots = 0
@@ -83,21 +95,23 @@ function selectPages(homepage: Homepage): { urls: string[]; blockedByRobots: num
     }
     byPath.set(path, `${homepage.origin}${url.pathname}`)
   }
-  const ranked = [...byPath.entries()].map(([path, url], order) => ({ url, order, rank: priorityOf(path) }))
+  const ranked = [...byPath.entries()]
+    .map(([path, url], order) => ({ url, order, rank: priorityOf(path, options) }))
+    .filter((entry) => !options.onlyMatching || entry.rank < options.priorityPaths.length)
   ranked.sort((a, b) => a.rank - b.rank || a.order - b.order)
-  return { urls: takeAcrossSections(ranked.map((entry) => entry.url)), blockedByRobots }
+  return { urls: takeAcrossSections(ranked.map((entry) => entry.url), options), blockedByRobots }
 }
 
-function takeAcrossSections(urls: string[]): string[] {
+function takeAcrossSections(urls: string[], options: CrawlOptions): string[] {
   const perSection = new Map<string, number>()
   const taken: string[] = []
   for (const url of urls) {
     const section = new URL(url).pathname.split('/')[1] ?? ''
     const count = perSection.get(section) ?? 0
-    if (count >= MAX_PAGES_PER_SECTION) continue
+    if (count >= options.maxPagesPerSection) continue
     perSection.set(section, count + 1)
     taken.push(url)
-    if (taken.length === MAX_EXTRA_PAGES) break
+    if (taken.length === options.maxExtraPages) break
   }
   return taken
 }
@@ -125,10 +139,10 @@ function capText(pages: CrawledPage[]): CrawledPage[] {
 
 // Reads a site's homepage plus its most informative pages. Throws PipelineError
 // (robots_disallowed | site_unreachable) for expected failures. Reused by the company profiler.
-export async function crawlSite(deps: CrawlStepDeps, domain: string): Promise<CrawledSite> {
+export async function crawlSite(deps: CrawlStepDeps, domain: string, options: CrawlOptions = ANALYSIS_CRAWL): Promise<CrawledSite> {
   const deadline = deps.clock.now().getTime() + CRAWL_BUDGET_MS
   const homepage = await fetchHomepage(deps, domain)
-  const selection = selectPages(homepage)
+  const selection = selectPages(homepage, options)
   const extra = await fetchPages(deps, selection.urls, deadline)
   const pages = capText([homepage.page, ...extra.pages])
   return { domain, origin: homepage.origin, pages, blockedByRobots: selection.blockedByRobots, failedPages: extra.failed }

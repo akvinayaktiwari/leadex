@@ -3,7 +3,7 @@ import type { CrawledPage, CrawledSite, PageSignals } from '../../src/types/inde
 
 export function crawledPage(path: string, text: string, signals: Partial<PageSignals> = {}): CrawledPage {
   const url = `https://acme.com${path}`
-  return { url, path, title: `Acme ${path}`, description: '', text, signals: { technologies: [], hasStructuredData: false, jobBoards: [], ...signals } }
+  return { url, path, title: `Acme ${path}`, description: '', text, signals: { technologies: [], hasStructuredData: false, jobBoards: [], people: [], emails: [], ...signals } }
 }
 
 export function crawledSite(pages: CrawledPage[]): CrawledSite {
