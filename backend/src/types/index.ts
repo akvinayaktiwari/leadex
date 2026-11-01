@@ -876,3 +876,63 @@ export interface DomainMail {
 export interface MailDnsRepository {
   lookup(domain: string): Promise<DomainMail>
 }
+
+export interface EmailCheck {
+  personKey: string
+  domain: string
+  email: string
+  status: VerificationStatus
+  reason: string
+  checkedBy: string
+  checkedAt: string
+}
+
+export interface EmailResult {
+  personKey: string
+  email: string
+  pattern: string
+  status: VerificationStatus
+  checkedBy: string
+  checkedAt: string
+}
+
+export interface DomainPatternRow {
+  domain: string
+  pattern: string
+  evidenceCount: number
+  mxHost: string
+  acceptsAll: boolean
+  checkedAt: string
+}
+
+export interface EmailEvidenceRow {
+  domain: string
+  email: string
+  strength: 'verified' | 'published_linked' | 'published_unlinked'
+  firstName: string
+  lastName: string
+}
+
+export interface PersonNeedingEmail {
+  person: PersonRecord
+  // Company size band, for default format order.
+  employeeBand?: EmployeeBand | undefined
+}
+
+export interface EmailSelection {
+  limit: number
+  excludedCountries: string[]
+  // 'unknown' results are retried after this; 'valid' and 'catch_all' are re-checked after recheckBefore.
+  retryUnknownBefore: string
+  recheckBefore: string
+}
+
+export interface EmailFinderRepository {
+  peopleNeedingEmail(selection: EmailSelection): Promise<PersonNeedingEmail[]>
+  evidence(domains: string[]): Promise<EmailEvidenceRow[]>
+  colleagues(domains: string[]): Promise<PersonRecord[]>
+  invalidAddresses(domains: string[]): Promise<Set<string>>
+  insertChecks(checks: EmailCheck[]): Promise<void>
+  insertResults(results: EmailResult[]): Promise<void>
+  insertDomainPatterns(rows: DomainPatternRow[]): Promise<void>
+}
