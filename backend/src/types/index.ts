@@ -699,3 +699,32 @@ export interface GleifSource {
   // Streams records from a golden-copy CSV zip. Breaking out of the loop stops the download.
   streamRecords(zipUrl: string): AsyncIterable<GleifRecord>
 }
+
+export interface LegalEntityNameRow {
+  nameKey: string
+  lei: string
+  legalCountry: string
+  hqCountry: string
+  entityStatus: string
+  registrationStatus: string
+  publishDate: string
+}
+
+export type GleifImportKind = 'full' | 'delta'
+
+export interface GleifImportRecord {
+  kind: GleifImportKind
+  publishDate: string
+  records: number
+  importedAt: string
+}
+
+export interface LegalEntitiesRepository {
+  insertEntities(records: GleifRecord[], publishDate: string): Promise<void>
+  insertNames(rows: LegalEntityNameRow[]): Promise<void>
+  // Most recent import of the kind, if any.
+  latestImport(kind: GleifImportKind): Promise<GleifImportRecord | undefined>
+  hasImport(kind: GleifImportKind, publishDate: string): Promise<boolean>
+  recordImport(record: GleifImportRecord): Promise<void>
+  findNames(nameKeys: string[]): Promise<LegalEntityNameRow[]>
+}
