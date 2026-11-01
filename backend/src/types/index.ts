@@ -936,3 +936,16 @@ export interface EmailFinderRepository {
   insertResults(results: EmailResult[]): Promise<void>
   insertDomainPatterns(rows: DomainPatternRow[]): Promise<void>
 }
+
+export interface EmailBatchSummary {
+  people: number
+  valid: number
+  catchAll: number
+  invalid: number
+  unknown: number
+  noMailDomain: number
+  // Paid verifier calls made.
+  checks: number
+  // Set when the batch ended early, e.g. out of verifier credits.
+  stoppedReason?: string | undefined
+}
