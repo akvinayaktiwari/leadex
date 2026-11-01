@@ -356,7 +356,8 @@ export type FactSource =
   | 'web_data_commons'
   | 'pdl'
 
-export type FactMethod = 'registry' | 'structured_data' | 'page_extract' | 'vendor'
+// 'derived': inferred from another stored fact (e.g. a person's country from their company's country).
+export type FactMethod = 'registry' | 'structured_data' | 'page_extract' | 'vendor' | 'derived'
 
 // How far we may keep and reuse a fact: our own extraction, an open-data licence,
 // an official public record, or a vendor's licence terms.
@@ -773,4 +774,24 @@ export interface LegalMatchSummary {
   matched: number
   noMatch: number
   ambiguous: number
+}
+
+// ---- People from company websites (#23 part 1) ----
+
+export type PersonRejection = 'not_current' | 'not_a_name' | 'no_title' | 'unsourced' | 'duplicate'
+
+export interface PublishedEmailRow {
+  domain: string
+  email: string
+  kind: EmailKind
+  // The named person the address belongs to, or '' when it is not tied to one.
+  personKey: string
+  sourceUrl: string
+  seenAt: string
+}
+
+export interface PeopleDecision {
+  writes: PersonWrite[]
+  rejected: Partial<Record<PersonRejection, number>>
+  emails: PublishedEmailRow[]
 }

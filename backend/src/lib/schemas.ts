@@ -90,3 +90,16 @@ export const companyProfileDraftSchema = z.object({
 })
 
 export type CompanyProfileDraft = z.infer<typeof companyProfileDraftSchema>
+
+// What the model returns for people on a company's own pages (#23). The quote must contain the name and the title.
+export const peopleDraftSchema = z.object({
+  people: z.array(z.object({
+    name: z.string().min(1).max(80),
+    title: z.string().max(120),
+    isCurrentStaff: z.boolean(),
+    sourceUrl: z.string().max(2000),
+    quote: z.string().max(300),
+  })).max(40),
+})
+
+export type PeopleDraft = z.infer<typeof peopleDraftSchema>
