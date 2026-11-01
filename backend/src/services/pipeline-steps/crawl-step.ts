@@ -2,6 +2,7 @@ import { isSameSite, normalizeDomain } from '../../lib/domain.js'
 import { PipelineError } from '../../lib/errors.js'
 import { extractPage } from '../../lib/html-text.js'
 import { ALLOW_ALL, isPathAllowed, parseRobots, type RobotsPolicy } from '../../lib/robots.js'
+import { readPageSignals } from '../../lib/site-signals.js'
 import type { AnalysisState, Clock, CrawledPage, CrawledSite, PipelineStep, SiteFetchRepository, StepContext } from '../../types/index.js'
 
 export const CRAWLER_AGENT_TOKEN = 'leadexbot'
@@ -43,7 +44,8 @@ async function loadRobots(deps: CrawlStepDeps, origin: string): Promise<RobotsPo
 
 function toPage(url: string, html: string): { page: CrawledPage; links: string[] } {
   const extracted = extractPage(html, url)
-  const page: CrawledPage = { url, path: new URL(url).pathname, title: extracted.title, description: extracted.description, text: extracted.text }
+  const signals = readPageSignals(html, url, extracted.links)
+  const page: CrawledPage = { url, path: new URL(url).pathname, title: extracted.title, description: extracted.description, text: extracted.text, signals }
   return { page, links: extracted.links }
 }
 
@@ -121,7 +123,9 @@ function capText(pages: CrawledPage[]): CrawledPage[] {
   return kept
 }
 
-async function crawl(deps: CrawlStepDeps, domain: string): Promise<CrawledSite> {
+// Reads a site's homepage plus its most informative pages. Throws PipelineError
+// (robots_disallowed | site_unreachable) for expected failures. Reused by the company profiler.
+export async function crawlSite(deps: CrawlStepDeps, domain: string): Promise<CrawledSite> {
   const deadline = deps.clock.now().getTime() + CRAWL_BUDGET_MS
   const homepage = await fetchHomepage(deps, domain)
   const selection = selectPages(homepage)
@@ -133,7 +137,7 @@ async function crawl(deps: CrawlStepDeps, domain: string): Promise<CrawledSite> 
 async function execute(deps: CrawlStepDeps, state: AnalysisState, context: StepContext): Promise<void> {
   const normalized = normalizeDomain(context.run.domain)
   if (!normalized.ok) throw new PipelineError('invalid_url', 'That does not look like a public website address')
-  const site = await crawl(deps, normalized.domain)
+  const site = await crawlSite(deps, normalized.domain)
   const textChars = site.pages.reduce((sum, page) => sum + page.text.length, 0)
   if (textChars < MIN_SITE_TEXT_CHARS) {
     throw new PipelineError('site_unreadable', `${site.domain} has almost no readable text. It may need JavaScript to show its content.`)

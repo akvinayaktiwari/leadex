@@ -239,6 +239,8 @@ export interface CrawledPage {
   title: string
   description: string
   text: string
+  // Read from the raw HTML before text extraction (scripts and JSON-LD are stripped from `text`).
+  signals?: PageSignals | undefined
 }
 
 export interface CrawledSite {
@@ -401,9 +403,12 @@ export interface Fact extends FactInput {
 export type CompanyDraft = Omit<CompanyRecord, 'companyId' | 'updatedAt'>
 export type PersonDraft = Omit<PersonRecord, 'personKey' | 'updatedAt'>
 
+// Signals are stored as facts on the company ("signal.google_ads" = "true"), with their own source URL.
+export type CompanySignalField = `signal.${string}`
+
 export interface CompanyWrite {
   company: CompanyDraft
-  facts: FactInput<CompanyField>[]
+  facts: FactInput<CompanyField | CompanySignalField>[]
 }
 
 export interface PersonWrite {
@@ -554,4 +559,102 @@ export interface DomainImportOptions {
   url: string
   maxDomains: number
   batchSize: number
+}
+
+// ---- Company profiler (#22 part 2) ----
+
+export type TechnologyName =
+  | 'google_analytics' | 'google_tag_manager' | 'google_ads' | 'meta_pixel' | 'linkedin_insight' | 'hubspot'
+  | 'salesforce_pardot' | 'marketo' | 'segment' | 'hotjar' | 'intercom' | 'zendesk' | 'drift' | 'calendly' | 'stripe'
+  | 'shopify' | 'woocommerce' | 'wordpress' | 'wix' | 'squarespace' | 'webflow' | 'nextjs'
+
+export type JobBoardProvider = 'greenhouse' | 'lever' | 'ashby' | 'workable'
+
+export interface JobBoardLink {
+  provider: JobBoardProvider
+  board: string
+  url: string
+}
+
+// Business details a site publishes as schema.org JSON-LD (Organization, LocalBusiness, …).
+export interface StructuredOrganization {
+  name?: string | undefined
+  legalName?: string | undefined
+  telephone?: string | undefined
+  country?: string | undefined
+  region?: string | undefined
+  city?: string | undefined
+  foundingDate?: string | undefined
+}
+
+export interface AgencyCredit {
+  name: string
+  url?: string | undefined
+  // 0.9 for an explicit "Website by …", 0.75 for a bare descriptive credit. Lower ones are not recorded.
+  confidence: number
+}
+
+export interface PageSignals {
+  technologies: TechnologyName[]
+  organization?: StructuredOrganization | undefined
+  hasStructuredData: boolean
+  agency?: AgencyCredit | undefined
+  jobBoards: JobBoardLink[]
+}
+
+export interface ProfileCandidate {
+  domain: string
+  harmonicRank: number
+  attempts: number
+}
+
+export type CrawlOutcome = 'profiled' | 'skipped' | 'failed'
+
+export type ProfileSkipReason =
+  | 'not_a_business' | 'unknown_country' | 'blocked_country' | 'redirects_elsewhere' | 'robots_disallowed'
+  | 'site_unreadable' | 'suppressed' | 'no_provenance'
+
+export type ProfileFailReason = 'unreachable' | 'llm_failed' | 'error'
+
+export interface CrawlStatusEntry {
+  domain: string
+  status: CrawlOutcome
+  reason: ProfileSkipReason | ProfileFailReason | ''
+  attempts: number
+  checkedAt: string
+}
+
+export interface ProfileSelection {
+  limit: number
+  excludedDomains: string[]
+  maxAttempts: number
+  // Failed domains are retried only after this time; profiled ones are refreshed only before refreshBefore.
+  retryFailedBefore: string
+  refreshProfiledBefore: string
+}
+
+export interface CrawlStatusRepository {
+  nextToProfile(selection: ProfileSelection): Promise<ProfileCandidate[]>
+  recordStatus(entries: CrawlStatusEntry[]): Promise<void>
+}
+
+export interface ProfilerUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+}
+
+export interface ProfileBatchSummary {
+  attempted: number
+  profiled: number
+  skipped: Partial<Record<ProfileSkipReason, number>>
+  failed: Partial<Record<ProfileFailReason, number>>
+  usage: ProfilerUsage
+  // Present when model prices are configured.
+  costUsd?: number | undefined
+}
+
+export interface LlmPrices {
+  inputUsdPerMillion: number
+  outputUsdPerMillion: number
 }
