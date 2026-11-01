@@ -7,6 +7,8 @@ import type {
 } from '../types/index.js'
 
 const DAY_MS = 86_400_000
+// Long runs of skipped (EU/EEA/UK) records write nothing, so progress is logged by records read, not by batches.
+const PROGRESS_EVERY_RECORDS = 100_000
 
 export interface GleifImportDeps {
   source: GleifSource
@@ -52,7 +54,10 @@ async function streamFile(deps: GleifImportDeps, url: string, publishDate: strin
     entities = []
     names = []
   }
+  let read = 0
   for await (const record of deps.source.streamRecords(url)) {
+    read += 1
+    if (read % PROGRESS_EVERY_RECORDS === 0) logInfo('gleif import progress', { read, written: written + entities.length, skipped })
     if (!isImportable(record)) {
       skipped += 1
       continue
