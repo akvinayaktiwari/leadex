@@ -54,12 +54,15 @@ export const runEventSchema = z.discriminatedUnion('kind', [
 const marketCodeSchema = z.string().regex(/^([A-Z]{2}|GLOBAL)$/, 'Use an ISO-3166 alpha-2 code (e.g. "IN") or "GLOBAL"')
 
 // What the model returns for the profile step; the domain is added by the step, never by the model.
+// Each claim names the crawled page it came from; the step keeps the URL only if it is one of the pages it sent.
+const sourcedClaim = z.object({ text: z.string().min(1).max(200), sourceUrl: z.string().max(2000) })
+
 export const productProfileDraftSchema = z.object({
   name: z.string().min(1).max(80),
-  oneLiner: z.string().min(1).max(160),
-  valueProps: z.array(z.string().min(1).max(200)).min(3).max(6),
-  category: z.string().min(1).max(80),
-  pricingSignals: z.array(z.string().min(1).max(120)).max(6),
+  oneLiner: z.object({ text: z.string().min(1).max(160), sourceUrl: z.string().max(2000) }),
+  valueProps: z.array(sourcedClaim).min(3).max(6),
+  category: z.object({ text: z.string().min(1).max(80), sourceUrl: z.string().max(2000) }),
+  pricingSignals: z.array(sourcedClaim.extend({ text: z.string().min(1).max(120) })).max(6),
   servedMarkets: z.array(marketCodeSchema).min(1).max(15),
 })
 

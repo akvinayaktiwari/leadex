@@ -8,7 +8,7 @@ import { sampleRun } from './support/in-memory-run-store.js'
 
 const PROFILE: ProductProfile = {
   domain: 'qdnco.com', name: 'QD & Co.', oneLiner: 'Real estate performance marketing', valueProps: ['a', 'b', 'c'],
-  category: 'real estate marketing agency', pricingSignals: [], servedMarkets: ['IN', 'AE'],
+  category: 'real estate marketing agency', pricingSignals: [], servedMarkets: ['IN', 'AE'], claims: [], crawledAt: '2026-11-02T10:00:00.000Z',
 }
 
 const segment = (name: string, sharePct: number, overrides: Partial<SegmentsDraft['segments'][number]> = {}): SegmentsDraft['segments'][number] => ({

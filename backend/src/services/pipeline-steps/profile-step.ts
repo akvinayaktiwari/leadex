@@ -1,6 +1,6 @@
 import { PipelineError } from '../../lib/errors.js'
 import { productProfileDraftSchema, type ProductProfileDraft } from '../../lib/schemas.js'
-import type { AnalysisState, CrawledPage, LlmModels, LlmRepository, PipelineStep, ProductProfile, StepContext } from '../../types/index.js'
+import type { AnalysisState, CrawledPage, CrawledSite, LlmModels, LlmRepository, PipelineStep, ProductProfile, ProfileClaim, StepContext } from '../../types/index.js'
 import { generateStructured } from '../structured-output-service.js'
 
 // About 15k tokens of site text: enough for a homepage plus the key pages, and keeps one analysis cheap.
@@ -19,6 +19,8 @@ Rules:
 - valueProps: 3 to 6 concrete capabilities or outcomes the site claims.
 - category: a short market category a buyer would recognise, such as "payroll software for small businesses" or "brand design agency".
 - pricingSignals: pricing facts visible on the site (model, free trial, starting price with currency). Use an empty list if there are none.
+- Each claim (oneLiner, category, every valueProp and pricingSignal) has a sourceUrl: copy the exact url attribute of the
+  <page> it came from.
 - servedMarkets: where the business sells, as upper-case ISO-3166 alpha-2 codes. Infer from addresses, phone formats, currency, local language and explicit statements. Use ["GLOBAL"] only when the site clearly sells worldwide, for example self-serve software with no regional limits.`
 
 export interface ProfileStepDeps {
@@ -51,9 +53,23 @@ export function buildSiteDigest(pages: CrawledPage[]): { digest: string; usedPag
   return { digest: parts.join(PAGE_SEPARATOR), usedPages: parts.length }
 }
 
-export function toProfile(domain: string, draft: ProductProfileDraft): ProductProfile {
+function claim(field: ProfileClaim['field'], text: string, sourceUrl: string, pages: Set<string>): ProfileClaim {
+  return { field, text, sourceUrl: pages.has(sourceUrl) ? sourceUrl : '' }
+}
+
+export function toProfile(site: CrawledSite, draft: ProductProfileDraft): ProductProfile {
   const markets = [...new Set(draft.servedMarkets)]
-  return { domain, ...draft, servedMarkets: markets.includes('GLOBAL') ? ['GLOBAL'] : markets }
+  const pages = new Set(site.pages.map((page) => page.url))
+  const claims = [
+    claim('oneLiner', draft.oneLiner.text, draft.oneLiner.sourceUrl, pages), claim('category', draft.category.text, draft.category.sourceUrl, pages),
+    ...draft.valueProps.map((item) => claim('valueProp', item.text, item.sourceUrl, pages)),
+    ...draft.pricingSignals.map((item) => claim('pricingSignal', item.text, item.sourceUrl, pages)),
+  ]
+  return {
+    domain: site.domain, name: draft.name, oneLiner: draft.oneLiner.text, category: draft.category.text,
+    valueProps: draft.valueProps.map((item) => item.text), pricingSignals: draft.pricingSignals.map((item) => item.text),
+    servedMarkets: markets.includes('GLOBAL') ? ['GLOBAL'] : markets, claims, crawledAt: site.fetchedAt,
+  }
 }
 
 async function execute(deps: ProfileStepDeps, state: AnalysisState, context: StepContext): Promise<void> {
@@ -73,7 +89,7 @@ async function execute(deps: ProfileStepDeps, state: AnalysisState, context: Ste
     schema: productProfileDraftSchema,
     failureCode: 'profile_invalid',
   })
-  const profile = toProfile(site.domain, draft)
+  const profile = toProfile(site, draft)
   state.profile = profile
   await context.emit({ kind: 'artifact', step: 'profile', artifact: 'profile', data: profile })
 }

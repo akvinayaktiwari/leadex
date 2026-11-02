@@ -140,12 +140,13 @@ function capText(pages: CrawledPage[]): CrawledPage[] {
 // Reads a site's homepage plus its most informative pages. Throws PipelineError
 // (robots_disallowed | site_unreachable) for expected failures. Reused by the company profiler.
 export async function crawlSite(deps: CrawlStepDeps, domain: string, options: CrawlOptions = ANALYSIS_CRAWL): Promise<CrawledSite> {
-  const deadline = deps.clock.now().getTime() + CRAWL_BUDGET_MS
+  const startedAt = deps.clock.now()
+  const deadline = startedAt.getTime() + CRAWL_BUDGET_MS
   const homepage = await fetchHomepage(deps, domain)
   const selection = selectPages(homepage, options)
   const extra = await fetchPages(deps, selection.urls, deadline)
   const pages = capText([homepage.page, ...extra.pages])
-  return { domain, origin: homepage.origin, pages, blockedByRobots: selection.blockedByRobots, failedPages: extra.failed }
+  return { domain, origin: homepage.origin, pages, blockedByRobots: selection.blockedByRobots, failedPages: extra.failed, fetchedAt: startedAt.toISOString() }
 }
 
 async function execute(deps: CrawlStepDeps, state: AnalysisState, context: StepContext): Promise<void> {

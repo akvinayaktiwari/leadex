@@ -233,6 +233,15 @@ export interface LayerViolation {
 
 // ---- Analysis pipeline ----
 
+export type ProfileClaimField = 'oneLiner' | 'category' | 'valueProp' | 'pricingSignal'
+
+// A product claim with the crawled page it came from ('' when the model cited no page we read).
+export interface ProfileClaim {
+  field: ProfileClaimField
+  text: string
+  sourceUrl: string
+}
+
 export interface ProductProfile {
   domain: string
   name: string
@@ -242,6 +251,10 @@ export interface ProductProfile {
   pricingSignals: string[]
   // ISO-3166 alpha-2 codes, or ['GLOBAL'].
   servedMarkets: string[]
+  // Every claim above with its source page, shown next to the claim in the UI.
+  claims: ProfileClaim[]
+  // When the site was read.
+  crawledAt: string
 }
 
 export interface CrawledPage {
@@ -260,6 +273,7 @@ export interface CrawledSite {
   pages: CrawledPage[]
   blockedByRobots: number
   failedPages: number
+  fetchedAt: string
 }
 
 export interface Competitor {
