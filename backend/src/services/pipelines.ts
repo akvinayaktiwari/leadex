@@ -1,6 +1,8 @@
 import type { AnalysisState, Clock, LlmModels, LlmRepository, PipelineRegistry, SiteFetchRepository } from '../types/index.js'
+import { createCompetitorsStep } from './pipeline-steps/competitors-step.js'
 import { createCrawlStep } from './pipeline-steps/crawl-step.js'
 import { createProfileStep } from './pipeline-steps/profile-step.js'
+import { createSegmentsStep } from './pipeline-steps/segments-step.js'
 
 export interface PipelineDeps {
   siteFetch: SiteFetchRepository
@@ -9,13 +11,13 @@ export interface PipelineDeps {
   clock: Clock
 }
 
-// competitors and segments join the analysis pipeline in #5; lead_build (prospect, qualify, draft, charge)
-// lands in #10 and #11. A run whose type has no pipeline ends with `pipeline_unavailable` instead of hanging.
+// The free analysis: crawl, profile, competitors, segments. lead_build (prospect, qualify, draft, charge) lands in
+// #12 and #13. A run whose type has no pipeline ends with `pipeline_unavailable` instead of hanging.
 export function createPipelineRegistry(deps: PipelineDeps): PipelineRegistry {
   return {
     analysis: () => {
       const state: AnalysisState = {}
-      return [createCrawlStep(deps, state), createProfileStep(deps, state)]
+      return [createCrawlStep(deps, state), createProfileStep(deps, state), createCompetitorsStep(deps, state), createSegmentsStep(deps, state)]
     },
   }
 }

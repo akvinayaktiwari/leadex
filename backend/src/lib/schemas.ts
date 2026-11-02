@@ -103,3 +103,36 @@ export const peopleDraftSchema = z.object({
 })
 
 export type PeopleDraft = z.infer<typeof peopleDraftSchema>
+
+// What the model returns for the competitors step (#5). Countries are checked against each competitor's own site.
+export const competitorsDraftSchema = z.object({
+  competitors: z.array(z.object({
+    domain: z.string().min(3).max(253),
+    name: z.string().min(1).max(80),
+    reason: z.string().min(1).max(160),
+    hqCountry: z.string().regex(/^([A-Z]{2}|UNKNOWN)$/, 'Use an ISO-3166 alpha-2 code or "UNKNOWN"'),
+  })).max(20),
+})
+
+export type CompetitorsDraft = z.infer<typeof competitorsDraftSchema>
+
+// What the model returns for the segments step (#5). Shares are rescaled to sum to 100 after validation.
+export const segmentsDraftSchema = z.object({
+  segments: z.array(z.object({
+    name: z.string().min(1).max(60),
+    useCase: z.string().min(1).max(200),
+    pain: z.string().min(1).max(200),
+    criteria: z.array(z.string().min(1).max(120)).min(2).max(4),
+    buyerTitles: z.array(z.string().min(1).max(60)).min(2).max(6),
+    industries: z.array(z.enum(INDUSTRIES)).min(1).max(4),
+    // 0 means "no limit" for employeeMax.
+    employeeMin: z.number().int().min(0).max(1_000_000),
+    employeeMax: z.number().int().min(0).max(1_000_000),
+    countries: z.array(z.string().regex(/^[A-Z]{2}$/)).max(15),
+    keywords: z.array(z.string().min(1).max(40)).max(8),
+    technologies: z.array(z.string().min(1).max(40)).max(5),
+    sharePct: z.number().min(0).max(100),
+  })).min(4).max(6),
+})
+
+export type SegmentsDraft = z.infer<typeof segmentsDraftSchema>

@@ -251,10 +251,34 @@ export interface CrawledSite {
   failedPages: number
 }
 
+export interface Competitor {
+  domain: string
+  name: string
+  // Why the model thinks they compete, in one line.
+  reason: string
+  country: string
+  // How the country was established from the competitor's own site.
+  countrySource: 'structured_data' | 'phone' | 'cctld' | 'text'
+}
+
+export interface IcpSegment {
+  segmentId: string
+  name: string
+  useCase: string
+  pain: string
+  criteria: string[]
+  buyerTitles: string[]
+  filters: CompanyFilters
+  // All segments of an analysis sum to 100.
+  sharePct: number
+}
+
 // Shared by the steps of one analysis run (one instance per run, created by the pipeline factory).
 export interface AnalysisState {
   site?: CrawledSite | undefined
   profile?: ProductProfile | undefined
+  competitors?: Competitor[] | undefined
+  segments?: IcpSegment[] | undefined
 }
 
 export type FetchFailure = 'blocked_host' | 'timeout' | 'http_error' | 'unsupported_type' | 'too_large' | 'network'
