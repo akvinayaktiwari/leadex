@@ -48,3 +48,35 @@ h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.15; margin: 0 0 16px; }
 .status { margin-top: 32px; font-size: 14px; color: var(--muted); }
 .status-ok { color: var(--ok); }
 .status-bad { color: var(--bad); }
+
+.analysis { max-width: 880px; margin: 0 auto; padding: 48px 16px 96px; }
+.panel { border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin: 0 0 20px; }
+.panel h2 { font-size: 20px; margin: 0 0 12px; }
+.steps { list-style: none; margin: 0; padding: 0; }
+.step { padding: 4px 0; }
+.step .mark { display: inline-block; width: 1.2em; font-weight: 700; }
+.step-completed .mark { color: var(--ok); }
+.step-failed .mark { color: var(--bad); }
+.step-started .mark { color: var(--accent); }
+.notes { color: var(--muted); font-size: 14px; margin: 8px 0 0; padding-left: 20px; }
+.claims { list-style: none; margin: 0; padding: 0; }
+.claim { display: grid; grid-template-columns: 120px 1fr auto auto; gap: 4px 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); }
+.claim:first-child { border-top: 0; }
+.claim-field { color: var(--muted); font-size: 13px; }
+.claim-source { font-size: 13px; color: var(--muted); }
+.claim input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: inherit; }
+.corrected { color: var(--accent); font-style: normal; font-size: 13px; }
+.link-button { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; }
+.cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.card p { margin: 8px 0 0; }
+.segment-selected { border-color: var(--accent); }
+.share { height: 6px; background: var(--line); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+.share span { display: block; height: 100%; background: var(--accent); }
+.criteria { margin: 8px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+.panel > button { margin-top: 16px; padding: 12px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; }
+.panel > button:disabled { opacity: 0.5; cursor: not-allowed; }
+a { color: var(--accent); }
+@media (max-width: 640px) {
+  .claim { grid-template-columns: 1fr; }
+}
