@@ -17,7 +17,8 @@ function serve(response: ServerResponse, start: number, stallAfter?: number): vo
   response.writeHead(start > 0 ? 206 : 200, start > 0 ? { 'content-range': `bytes ${start}-${FILE.length - 1}/${FILE.length}` } : {})
   const end = stallAfter === undefined ? FILE.length : Math.min(FILE.length, start + stallAfter)
   for (let offset = start; offset < end; offset += 16_384) response.write(FILE.subarray(offset, Math.min(end, offset + 16_384)))
-  if (stallAfter === undefined) response.end()
+  // A real server ends the response once the file is complete, stalled or not.
+  if (stallAfter === undefined || end >= FILE.length) response.end()
 }
 
 describe('resumable download (local HTTP server)', () => {
@@ -77,12 +78,37 @@ describe('resumable download (local HTTP server)', () => {
     await expect(download('/no-range')).rejects.toThrow(/Cannot resume.*200/)
   })
 
-  // protects=a server that keeps stalling fails the job after maxRetries instead of retrying forever;
-  // fails_when=the ingest task hangs or loops without end;
+  // protects=a server that stops sending data fails the job after maxRetries stalls in a row with no progress;
+  // fails_when=the ingest task hangs or loops without end on a dead connection;
   // no_claim=n/a.
   it('gives up after the retry limit', async () => {
-    routes['/always-stalls'] = (request, response) => serve(response, rangeStart(request), 10_000)
+    // First request sends 10 KB then stalls; every resume sends nothing.
+    routes['/always-stalls'] = (request, response, n) => serve(response, rangeStart(request), n === 1 ? 10_000 : 0)
     await expect(download('/always-stalls')).rejects.toThrow(/No data .* for 150 ms/)
     expect(counts['/always-stalls']).toBe(OPTIONS.maxRetries + 1)
+  })
+
+  // protects=the retry limit counts stalls in a row without new data, so a download that keeps progressing through more
+  // stalls than maxRetries still completes;
+  // fails_when=a long download on a flaky link is abandoned after maxRetries total interruptions despite progress
+  // (the full GLEIF import failed this way on 2026-11-01);
+  // no_claim=n/a.
+  it('keeps going while each resume makes progress', async () => {
+    // Stalls after every 20 KB: 10 interruptions for a 200 KB file, more than maxRetries (3), each with progress.
+    routes['/progressing'] = (request, response) => serve(response, rangeStart(request), 20_000)
+    expect((await download('/progressing')).equals(FILE)).toBe(true)
+    expect(counts['/progressing']).toBeGreaterThan(OPTIONS.maxRetries + 1)
+  })
+
+  // protects=a server that accepts the connection but never sends response headers is treated as a stall and resumed;
+  // fails_when=the client waits forever for headers (the idle timeout used to cover only body reads);
+  // no_claim=n/a.
+  it('times out a server that never answers', async () => {
+    routes['/silent-first'] = (request, response, n) => {
+      if (n === 1) return
+      serve(response, rangeStart(request))
+    }
+    expect((await download('/silent-first')).equals(FILE)).toBe(true)
+    expect(counts['/silent-first']).toBe(2)
   })
 })
