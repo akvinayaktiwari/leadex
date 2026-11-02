@@ -1,4 +1,4 @@
-import type { ApiConnection, HealthStatus } from '@/types'
+import type { ApiConnection, HealthStatus, StartAnalysisResult } from '@/types'
 import { getPublicConfig } from './config'
 
 export async function checkApiConnection(): Promise<ApiConnection> {
@@ -12,5 +12,27 @@ export async function checkApiConnection(): Promise<ApiConnection> {
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'network error'
     return { state: 'unreachable', reason }
+  }
+}
+
+interface ErrorBody {
+  error?: { code?: string; message?: string }
+}
+
+export async function startAnalysis(url: string): Promise<StartAnalysisResult> {
+  const { apiUrl } = getPublicConfig()
+  if (!apiUrl) return { ok: false, message: 'The app is not configured (NEXT_PUBLIC_API_URL is not set)' }
+  try {
+    const response = await fetch(`${apiUrl}/api/analyses`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify({ url }),
+    })
+    if (response.status === 202) {
+      const body = (await response.json()) as { runId: string; domain: string }
+      return { ok: true, runId: body.runId, domain: body.domain }
+    }
+    const body = (await response.json().catch(() => ({}))) as ErrorBody
+    return { ok: false, message: body.error?.message ?? `Something went wrong (${response.status})` }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? `Could not reach Leadex: ${error.message}` : 'Could not reach Leadex' }
   }
 }

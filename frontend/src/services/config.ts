@@ -4,6 +4,7 @@ import type { PublicConfig } from '@/types'
 export function getPublicConfig(): PublicConfig {
   return {
     apiUrl: process.env.NEXT_PUBLIC_API_URL ?? '',
+    streamUrl: process.env.NEXT_PUBLIC_STREAM_URL ?? '',
     turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '',
   }
 }

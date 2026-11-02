@@ -13,8 +13,14 @@ export type ApiConnection =
 
 export interface PublicConfig {
   apiUrl: string
+  // The run-event stream is served by a separate function (RESPONSE_STREAM) with its own URL.
+  streamUrl: string
   turnstileSiteKey: string
 }
+
+export type StartAnalysisResult = { ok: true; runId: string; domain: string } | { ok: false; message: string }
+
+export type ConnectionState = 'connecting' | 'open' | 'reconnecting' | 'closed'
 
 // ---- Analysis runs (mirror of the backend's run events and artifacts) ----
 
