@@ -25,6 +25,7 @@ new LeadexStack(app, `Leadex-${stage}`, {
   pipelineVersion: process.env.PIPELINE_VERSION ?? '1',
   llmModels: { smart: requireEnv('LLM_MODEL_SMART'), fast: requireEnv('LLM_MODEL_FAST') },
   ...(process.env.SENTRY_DSN ? { sentryDsn: process.env.SENTRY_DSN } : {}),
+  publicAnalysesEnabled: process.env.PUBLIC_ANALYSES_ENABLED === 'true',
   ingestEnabled: process.env.INGEST_ENABLED === 'true',
   ...(process.env.CC_DOMAIN_RANKS_URL ? { ccDomainRanksUrl: process.env.CC_DOMAIN_RANKS_URL } : {}),
   ...(process.env.INGEST_CC_MAX_DOMAINS ? { ingestCcMaxDomains: Number(process.env.INGEST_CC_MAX_DOMAINS) } : {}),

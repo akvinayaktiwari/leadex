@@ -11,6 +11,7 @@ const unusedServices: ApiServices = {
     authorize: () => Promise.reject(new Error('not used')),
     stream: () => Promise.reject(new Error('not used')),
   },
+  analyses: { start: () => Promise.reject(new Error('not used')) },
 }
 
 function setTestEnv(): void {

@@ -7,7 +7,8 @@ const apiEnvSchema = z.object({
   FRONTEND_URL: z.url(),
   PIPELINE_VERSION: z.string().min(1),
   SENTRY_DSN: z.string().optional(),
-}) satisfies z.ZodType<ApiEnv>
+  PUBLIC_ANALYSES_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+}) satisfies z.ZodType<ApiEnv, Record<string, unknown>>
 
 const runStoreEnvSchema = z.object({
   AWS_REGION: z.string().min(1),

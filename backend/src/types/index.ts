@@ -8,6 +8,8 @@ export interface ApiEnv {
   FRONTEND_URL: string
   PIPELINE_VERSION: string
   SENTRY_DSN?: string | undefined
+  // Anonymous analyses cost model calls; off until #7 adds rate limits, Turnstile and the domain cache.
+  PUBLIC_ANALYSES_ENABLED: boolean
 }
 
 export interface RunStoreEnv {
@@ -194,8 +196,17 @@ export interface RunStreamOptions {
   pageSize: number
 }
 
+export type StartAnalysisResult =
+  | { ok: true; runId: string; domain: string }
+  | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analyses_disabled' }
+
+export interface AnalysisService {
+  start(url: string): Promise<StartAnalysisResult>
+}
+
 export interface ApiServices {
   runStream: RunStreamService
+  analyses: AnalysisService
 }
 
 export type SentryRuntime = 'api' | 'stream' | 'worker' | 'ingest'

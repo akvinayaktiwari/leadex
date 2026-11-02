@@ -3,6 +3,7 @@ import { resetEnvCacheForTests } from '../src/lib/env.js'
 import { createApp } from '../src/routes/index.js'
 import { RUN_STREAM_DEFAULTS, createRunStreamService } from '../src/services/run-stream-service.js'
 import type { ApiErrorBody, ApiServices, RunEvent } from '../src/types/index.js'
+import { DISABLED_ANALYSES } from './support/stub-services.js'
 import { manualClock, memoryEvents, memoryRuns, sampleRun } from './support/in-memory-run-store.js'
 
 const TS = '2026-10-21T10:00:00.000Z'
@@ -19,7 +20,7 @@ async function services(): Promise<ApiServices> {
   await runs.create(sampleRun({ runId: 'run_lb', type: 'lead_build', userId: 'user_a' }))
   for (const event of EVENTS) await events.append('run_1', event)
   const runStream = createRunStreamService({ runs, events, clock: manualClock(), sleep: async () => {}, options: RUN_STREAM_DEFAULTS })
-  return { runStream }
+  return { runStream, analyses: DISABLED_ANALYSES }
 }
 
 function eventIds(body: string): string[] {

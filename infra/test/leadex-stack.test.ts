@@ -85,7 +85,7 @@ describe('LeadexStack', () => {
   it('passes config to functions through environment variables', () => {
     template.hasResourceProperties('AWS::Lambda::Function', {
       Environment: {
-        Variables: Match.objectLike({ STAGE: 'dev', FRONTEND_URL: 'http://localhost:3000', LEAD_BUILDS_ENABLED: 'false' }),
+        Variables: Match.objectLike({ STAGE: 'dev', FRONTEND_URL: 'http://localhost:3000', LEAD_BUILDS_ENABLED: 'false', PUBLIC_ANALYSES_ENABLED: 'false' }),
       },
     })
   })
