@@ -1,9 +1,14 @@
-import { Readable, Transform, pipeline, type TransformCallback } from 'node:stream'
+import { createReadStream } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Transform, pipeline, type TransformCallback } from 'node:stream'
 import { createInflateRaw } from 'node:zlib'
 import { parse } from 'csv-parse'
 import { z } from 'zod'
 import type { GleifPublish, GleifRecord, GleifSource } from '../types/index.js'
-import { RETRY_POLICY, resumableDownload } from './http-download.js'
+import { logInfo } from '../lib/logger.js'
+import { RETRY_POLICY, downloadToFile } from './http-download.js'
 
 const LOCAL_HEADER_SIGNATURE = 0x04034b50
 const DEFLATE = 8
@@ -120,6 +125,7 @@ const publishSchema = z.object({
 })
 
 const IDLE_TIMEOUT_MS = 30_000
+export const TEMP_PREFIX = 'leadex-gleif-'
 
 async function fetchJson(url: string, userAgent: string): Promise<unknown> {
   const response = await fetch(url, { headers: { 'user-agent': userAgent }, signal: AbortSignal.timeout(IDLE_TIMEOUT_MS) })
@@ -134,16 +140,22 @@ export function createGleifRepository(apiUrl: string, userAgent: string): GleifS
       const { publish_date: publishDate, lei2 } = body.data
       return { publishDate: `${publishDate.replace(' ', 'T')}Z`, fullCsvUrl: lei2.full_file.csv.url, fullRecords: lei2.full_file.csv.record_count, lastDayCsvUrl: lei2.delta_files.LastDay.csv.url }
     },
+    // Downloads the zip to a temporary file first, then imports from disk; the file is removed afterwards.
     async *streamRecords(zipUrl: string): AsyncGenerator<GleifRecord> {
-      const controller = new AbortController()
-      const bytes = resumableDownload(zipUrl, { userAgent, idleTimeoutMs: IDLE_TIMEOUT_MS, ...RETRY_POLICY, signal: controller.signal })
-      // pipeline forwards download, zip and CSV errors to the parser we read, so the loop throws instead of hanging.
-      const rows = pipeline(Readable.from(bytes), new FirstZipEntry(), createInflateRaw(), parse({ bom: true, relax_quotes: true }), () => {})
+      const dir = await mkdtemp(join(tmpdir(), TEMP_PREFIX))
       try {
-        yield* recordsFromCsv(rows)
+        const file = join(dir, 'golden-copy.zip')
+        const download = await downloadToFile(zipUrl, file, { userAgent, idleTimeoutMs: IDLE_TIMEOUT_MS, ...RETRY_POLICY })
+        logInfo('gleif download finished', { url: zipUrl, ...download })
+        // pipeline forwards zip and CSV errors to the parser we read, so the loop throws instead of hanging.
+        const rows = pipeline(createReadStream(file), new FirstZipEntry(), createInflateRaw(), parse({ bom: true, relax_quotes: true }), () => {})
+        try {
+          yield* recordsFromCsv(rows)
+        } finally {
+          rows.destroy()
+        }
       } finally {
-        rows.destroy()
-        controller.abort()
+        await rm(dir, { recursive: true, force: true })
       }
     },
   }

@@ -1,8 +1,10 @@
+import { readdir } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
+import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
 import { deflateRawSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createGleifRepository } from '../src/repositories/gleif-repository.js'
+import { TEMP_PREFIX, createGleifRepository } from '../src/repositories/gleif-repository.js'
 import type { GleifRecord } from '../src/types/index.js'
 
 const HEADER = [
@@ -82,6 +84,22 @@ describe('GLEIF repository (local HTTP server)', () => {
   // no_claim=n/a.
   it('fails on a file that is not a zip', async () => {
     await expect(collect('/not-a-zip.zip')).rejects.toThrow(/Not a zip/)
+  })
+
+  // protects=the zip is downloaded to a temporary file and that file is removed after a full import, a failed one, and a
+  // caller that stops reading early;
+  // fails_when=each run leaves a ~484 MB file behind and fills the task's disk;
+  // no_claim=n/a.
+  it('removes the downloaded file afterwards', async () => {
+    const leftovers = async (): Promise<string[]> => (await readdir(tmpdir())).filter((name) => name.startsWith(TEMP_PREFIX))
+    const before = await leftovers()
+    await collect('/zip64.zip')
+    await expect(collect('/not-a-zip.zip')).rejects.toThrow(/Not a zip/)
+    for await (const record of createGleifRepository(`${base}/publishes/latest`, 'test').streamRecords(`${base}/plain.zip`)) {
+      expect(record.lei).toBe('5493001KJTIIGC8Y1R12')
+      break
+    }
+    expect(await leftovers()).toEqual(before)
   })
 
   // protects=the publishes API is read into the full and last-day CSV URLs with an ISO publish date;

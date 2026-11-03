@@ -1,5 +1,8 @@
 // Streams a large public file, surviving network stalls: if no bytes arrive for idleTimeoutMs while we are
 // waiting for the network, the request is aborted and resumed with an HTTP Range request from the byte reached.
+import { createWriteStream } from 'node:fs'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { logInfo } from '../lib/logger.js'
 
 export interface DownloadOptions {
@@ -115,4 +118,19 @@ export async function* resumableDownload(url: string, options: DownloadOptions):
       await waitBeforeRetry(delayMs, options.signal)
     }
   }
+}
+
+// Saves the whole file before anything reads it, so a slow consumer never holds the connection open for hours (the GLEIF
+// import kept one open ~9.5 h and was cut every ~15 minutes).
+export async function downloadToFile(url: string, path: string, options: DownloadOptions): Promise<{ bytes: number; durationMs: number }> {
+  const startedAt = Date.now()
+  let bytes = 0
+  const counted = async function* (): AsyncGenerator<Uint8Array> {
+    for await (const chunk of resumableDownload(url, options)) {
+      bytes += chunk.length
+      yield chunk
+    }
+  }
+  await pipeline(Readable.from(counted()), createWriteStream(path))
+  return { bytes, durationMs: Date.now() - startedAt }
 }
