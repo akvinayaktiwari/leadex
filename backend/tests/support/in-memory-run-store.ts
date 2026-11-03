@@ -2,6 +2,7 @@ import type {
   AnalysisCacheRepository,
   CachedAnalysis,
   Clock,
+  RateLimitRepository,
   RunErrorInfo,
   RunEvent,
   RunEventsRepository,
@@ -130,6 +131,24 @@ export function memoryAnalysisCache(): MemoryAnalysisCache {
     },
     async put(entry: CachedAnalysis): Promise<void> {
       items.set(`${entry.domain}#${entry.pipelineVersion}`, entry)
+    },
+  }
+}
+
+export interface MemoryRateLimits extends RateLimitRepository {
+  counts: Map<string, number>
+}
+
+// Same all-or-nothing rule as the DynamoDB transaction.
+export function memoryRateLimits(): MemoryRateLimits {
+  const counts = new Map<string, number>()
+  return {
+    counts,
+    async consume(keys: string[], limit: number): Promise<boolean> {
+      const unique = [...new Set(keys)]
+      if (unique.some((key) => (counts.get(key) ?? 0) >= limit)) return false
+      for (const key of unique) counts.set(key, (counts.get(key) ?? 0) + 1)
+      return true
     },
   }
 }

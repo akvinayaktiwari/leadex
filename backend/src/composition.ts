@@ -3,16 +3,20 @@
 import { sleep, systemClock } from './lib/clock.js'
 import { newRunId } from './lib/ids.js'
 import { createDocumentClient } from './lib/dynamo-client.js'
+import { getAnalysesEnv } from './lib/env.js'
 import { createSqsClient } from './lib/sqs-client.js'
 import { createAnalysisCacheTableRepository } from './repositories/analysis-cache-table-repository.js'
+import { createRateLimitsTableRepository } from './repositories/rate-limits-table-repository.js'
 import { createRunEventsTableRepository } from './repositories/run-events-table-repository.js'
 import { createRunQueueRepository } from './repositories/run-queue-repository.js'
 import { createRunsTableRepository } from './repositories/runs-table-repository.js'
-import { createAnalysisService } from './services/analysis-service.js'
+import { DISABLED_ANALYSIS_SERVICE, createAnalysisService } from './services/analysis-service.js'
 import { createRunEngineService } from './services/run-engine-service.js'
 import { RUN_STREAM_DEFAULTS, createRunStreamService } from './services/run-stream-service.js'
 import type {
   AnalysisCacheRepository,
+  AnalysisService,
+  ApiEnv,
   ApiServices,
   RunEventsRepository,
   RunQueueRepository,
@@ -38,15 +42,24 @@ export function createRunStore(env: RunStoreEnv): RunStore {
 }
 
 // The API only creates runs (the worker executes them), so the run engine here has no pipelines.
-export interface AnalysesConfig {
-  enabled: boolean
-  pipelineVersion: string
+// Analyses are built only when enabled; their settings (rate-limit table, daily limit) are read only then.
+export function createAnalyses(store: RunStore, apiEnv: ApiEnv, storeEnv: RunStoreEnv): AnalysisService {
+  if (!apiEnv.PUBLIC_ANALYSES_ENABLED) return DISABLED_ANALYSIS_SERVICE
+  const env = getAnalysesEnv()
+  const documentClient = createDocumentClient(storeEnv.AWS_REGION, storeEnv.DYNAMODB_ENDPOINT)
+  return createAnalysisService({
+    runEngine: createRunEngineService({ ...store, pipelines: {}, clock: systemClock, newId: newRunId }),
+    cache: store.analysisCache,
+    rateLimits: createRateLimitsTableRepository(documentClient, env.TABLE_RATE_LIMITS),
+    clock: systemClock,
+    pipelineVersion: apiEnv.PIPELINE_VERSION,
+    dailyLimit: env.ANONYMOUS_ANALYSES_PER_DAY,
+  })
 }
 
-export function createApiServices(store: RunStore, analyses: AnalysesConfig): ApiServices {
-  const runEngine = createRunEngineService({ ...store, pipelines: {}, clock: systemClock, newId: newRunId })
+export function createApiServices(store: RunStore, analyses: AnalysisService): ApiServices {
   return {
     runStream: createRunStreamService({ ...store, clock: systemClock, sleep, options: RUN_STREAM_DEFAULTS }),
-    analyses: createAnalysisService({ runEngine, cache: store.analysisCache, clock: systemClock, ...analyses }),
+    analyses,
   }
 }

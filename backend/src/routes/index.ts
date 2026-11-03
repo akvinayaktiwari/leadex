@@ -4,19 +4,20 @@ import { getApiEnv } from '../lib/env.js'
 import { errorBody } from '../lib/http-errors.js'
 import { logError } from '../lib/logger.js'
 import { captureError } from '../lib/sentry.js'
-import type { ApiServices } from '../types/index.js'
+import type { ApiServices, ClientIpReader } from '../types/index.js'
 import { createAnalysesRoutes } from './analyses-routes.js'
 import { healthRoutes } from './health-routes.js'
 import { createRunsRoutes } from './runs-routes.js'
 
-export function createApp(services: ApiServices): Hono {
+// readClientIp differs per runtime (Lambda event or Node socket), so each entry point passes its own.
+export function createApp(services: ApiServices, readClientIp: ClientIpReader): Hono {
   const env = getApiEnv()
   const app = new Hono()
 
   app.use('/api/*', cors({ origin: env.FRONTEND_URL, credentials: true }))
   app.route('/api/health', healthRoutes)
   app.route('/api/runs', createRunsRoutes(services))
-  app.route('/api/analyses', createAnalysesRoutes(services))
+  app.route('/api/analyses', createAnalysesRoutes(services, readClientIp))
 
   app.notFound((c) => c.json(errorBody('not_found', 'Route not found'), 404))
   app.onError((error, c) => {

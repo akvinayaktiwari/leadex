@@ -1,3 +1,4 @@
+import type { Context } from 'hono'
 import type { ZodType } from 'zod'
 
 export type Stage = 'dev' | 'staging' | 'prod'
@@ -220,13 +221,34 @@ export interface RunStreamOptions {
   pageSize: number
 }
 
+export interface StartAnalysisRequest {
+  url: string
+  // The caller's address as the API sees it; 'unknown' if the runtime gives none.
+  ip: string
+  // A random id the browser keeps; a second, weaker limit than the IP.
+  deviceId?: string | undefined
+}
+
 export type StartAnalysisResult =
   | { ok: true; runId: string; domain: string; cached: boolean }
-  | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analyses_disabled' }
+  | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analyses_disabled' | 'rate_limited' }
 
 export interface AnalysisService {
-  start(url: string): Promise<StartAnalysisResult>
+  start(request: StartAnalysisRequest): Promise<StartAnalysisResult>
 }
+
+export interface RateLimitRepository {
+  // Counts one use on every key if all are under the limit; returns false and counts nothing if any key is at it.
+  consume(keys: string[], limit: number, expiresAt: string): Promise<boolean>
+}
+
+// Read only when PUBLIC_ANALYSES_ENABLED is true.
+export interface AnalysesEnv {
+  TABLE_RATE_LIMITS: string
+  ANONYMOUS_ANALYSES_PER_DAY: number
+}
+
+export type ClientIpReader = (c: Context) => string | undefined
 
 export interface ApiServices {
   runStream: RunStreamService

@@ -11,7 +11,7 @@ import { createRunEngineService } from '../src/services/run-engine-service.js'
 import { RUN_STREAM_DEFAULTS, createRunStreamService } from '../src/services/run-stream-service.js'
 import type { RunEvent } from '../src/types/index.js'
 import { acmeAnalysisFakes } from './support/analysis-fakes.js'
-import { manualClock, memoryQueue } from './support/in-memory-run-store.js'
+import { manualClock, memoryQueue, memoryRateLimits } from './support/in-memory-run-store.js'
 
 // DynamoDB Local, as in dynamo-repositories.test.ts.
 const ENDPOINT = process.env.DYNAMODB_ENDPOINT
@@ -62,7 +62,7 @@ describe.runIf(ENDPOINT)('analysis cache (DynamoDB Local)', () => {
     const saver = createAnalysisCacheService({ cache, events, clock, pipelineVersion: '1' })
     const worker = createRunEngineService({ runs, events, queue, pipelines, clock, newId, onRunDone: (run) => saver.saveFromRun(run) })
     const api = createRunEngineService({ runs, events, queue, pipelines: {}, clock, newId })
-    const analyses = createAnalysisService({ runEngine: api, cache, clock, pipelineVersion: '1', enabled: true })
+    const analyses = createAnalysisService({ runEngine: api, cache, rateLimits: memoryRateLimits(), clock, pipelineVersion: '1', dailyLimit: 100 })
     const stream = createRunStreamService({ runs, events, clock, sleep: async () => {}, options: RUN_STREAM_DEFAULTS })
     return { clock, queue, fakes, worker, analyses, stream }
   }
@@ -80,7 +80,7 @@ describe.runIf(ENDPOINT)('analysis cache (DynamoDB Local)', () => {
   // no_claim=fake site and model; real Lambda latency to DynamoDB is not measured here.
   it('replays a completed analysis with no crawl or model calls', async () => {
     const { queue, fakes, worker, analyses, stream } = setup()
-    const first = await analyses.start('https://acme.com/')
+    const first = await analyses.start({ url: 'https://acme.com/', ip: '203.0.113.7' })
     expect(first).toMatchObject({ ok: true, cached: false })
     if (!first.ok) return
     await worker.executeRun({ runId: first.runId, type: 'analysis' })
@@ -88,7 +88,7 @@ describe.runIf(ENDPOINT)('analysis cache (DynamoDB Local)', () => {
     const calls = { site: fakes.siteFetch.requested.length, llm: fakes.llm.requests.length, queued: queue.sent.length }
 
     const startedAt = Date.now()
-    const second = await analyses.start('acme.com')
+    const second = await analyses.start({ url: 'acme.com', ip: '203.0.113.7' })
     const replayed = second.ok ? await streamAll(stream, second.runId) : []
     expect(Date.now() - startedAt).toBeLessThan(3_000)
 
@@ -103,12 +103,12 @@ describe.runIf(ENDPOINT)('analysis cache (DynamoDB Local)', () => {
   // no_claim=n/a.
   it('runs again after 30 days or for a new pipeline version', async () => {
     const { clock, queue, worker, analyses } = setup()
-    const first = await analyses.start('acme.com')
+    const first = await analyses.start({ url: 'acme.com', ip: '203.0.113.7' })
     if (!first.ok) throw new Error('start failed')
     await worker.executeRun({ runId: first.runId, type: 'analysis' })
-    const newVersion = createAnalysisService({ runEngine: createRunEngineService({ runs, events, queue, pipelines: {}, clock, newId }), cache, clock, pipelineVersion: '2', enabled: true })
-    expect(await newVersion.start('acme.com')).toMatchObject({ cached: false })
+    const newVersion = createAnalysisService({ runEngine: createRunEngineService({ runs, events, queue, pipelines: {}, clock, newId }), cache, rateLimits: memoryRateLimits(), clock, pipelineVersion: '2', dailyLimit: 100 })
+    expect(await newVersion.start({ url: 'acme.com', ip: '203.0.113.7' })).toMatchObject({ cached: false })
     clock.advance(ANALYSIS_CACHE_TTL_MS)
-    expect(await analyses.start('acme.com')).toMatchObject({ cached: false })
+    expect(await analyses.start({ url: 'acme.com', ip: '203.0.113.7' })).toMatchObject({ cached: false })
   })
 })

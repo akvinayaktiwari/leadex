@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ApiEnv, IngestEnv, LeadDataEnv, RunStoreEnv, WorkerEnv } from '../types/index.js'
+import type { AnalysesEnv, ApiEnv, IngestEnv, LeadDataEnv, RunStoreEnv, WorkerEnv } from '../types/index.js'
 
 const apiEnvSchema = z.object({
   STAGE: z.enum(['dev', 'staging', 'prod']),
@@ -19,6 +19,11 @@ const runStoreEnvSchema = z.object({
   // Local development and tests only (DynamoDB Local). Unset in AWS.
   DYNAMODB_ENDPOINT: z.url().optional(),
 }) satisfies z.ZodType<RunStoreEnv>
+
+const analysesEnvSchema = z.object({
+  TABLE_RATE_LIMITS: z.string().min(1),
+  ANONYMOUS_ANALYSES_PER_DAY: z.coerce.number().int().min(1).max(1_000).default(3),
+}) satisfies z.ZodType<AnalysesEnv, Record<string, unknown>>
 
 const workerEnvSchema = apiEnvSchema.extend(runStoreEnvSchema.shape).extend({
   ANTHROPIC_API_KEY: z.string().min(1),
@@ -91,6 +96,10 @@ function parseEnv<T>(schema: z.ZodType<T>, source: NodeJS.ProcessEnv): T {
 export function getApiEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
   cachedApiEnv ??= parseEnv(apiEnvSchema, source)
   return cachedApiEnv
+}
+
+export function getAnalysesEnv(source: NodeJS.ProcessEnv = process.env): AnalysesEnv {
+  return parseEnv(analysesEnvSchema, source)
 }
 
 export function getRunStoreEnv(source: NodeJS.ProcessEnv = process.env): RunStoreEnv {
