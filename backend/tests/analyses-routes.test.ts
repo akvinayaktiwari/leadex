@@ -4,15 +4,16 @@ import { createApp } from '../src/routes/index.js'
 import { createAnalysisService } from '../src/services/analysis-service.js'
 import { createRunEngineService } from '../src/services/run-engine-service.js'
 import type { ApiServices } from '../src/types/index.js'
-import { manualClock, memoryEvents, memoryQueue, memoryRuns } from './support/in-memory-run-store.js'
+import { manualClock, memoryAnalysisCache, memoryEvents, memoryQueue, memoryRuns } from './support/in-memory-run-store.js'
 
 function setup(enabled: boolean) {
   const runs = memoryRuns()
   const queue = memoryQueue()
-  const runEngine = createRunEngineService({ runs, events: memoryEvents(), queue, pipelines: {}, clock: manualClock(), newId: () => 'run_new' })
+  const clock = manualClock()
+  const runEngine = createRunEngineService({ runs, events: memoryEvents(), queue, pipelines: {}, clock, newId: () => 'run_new' })
   const services: ApiServices = {
     runStream: { authorize: () => Promise.reject(new Error('not used')), stream: () => Promise.reject(new Error('not used')) },
-    analyses: createAnalysisService({ runEngine, enabled }),
+    analyses: createAnalysisService({ runEngine, cache: memoryAnalysisCache(), clock, pipelineVersion: '1', enabled }),
   }
   return { app: createApp(services), runs, queue }
 }
@@ -37,7 +38,7 @@ describe('POST /api/analyses', () => {
     const { app, runs, queue } = setup(true)
     const response = await post(app, { url: 'https://WWW.Acme.com/pricing?x=1' })
     expect(response.status).toBe(202)
-    expect(await response.json()).toEqual({ runId: 'run_new', domain: 'acme.com' })
+    expect(await response.json()).toEqual({ runId: 'run_new', domain: 'acme.com', cached: false })
     expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:3000')
     expect((await runs.get('run_new'))?.type).toBe('analysis')
     expect(queue.sent).toEqual([{ runId: 'run_new', type: 'analysis' }])

@@ -1,4 +1,6 @@
 import type {
+  AnalysisCacheRepository,
+  CachedAnalysis,
   Clock,
   RunErrorInfo,
   RunEvent,
@@ -112,5 +114,22 @@ export function sampleRun(overrides: Partial<RunRecord> = {}): RunRecord {
     createdAt: '2026-10-21T10:00:00.000Z',
     updatedAt: '2026-10-21T10:00:00.000Z',
     ...overrides,
+  }
+}
+
+export interface MemoryAnalysisCache extends AnalysisCacheRepository {
+  items: Map<string, CachedAnalysis>
+}
+
+export function memoryAnalysisCache(): MemoryAnalysisCache {
+  const items = new Map<string, CachedAnalysis>()
+  return {
+    items,
+    async get(domain: string, pipelineVersion: string): Promise<CachedAnalysis | undefined> {
+      return items.get(`${domain}#${pipelineVersion}`)
+    },
+    async put(entry: CachedAnalysis): Promise<void> {
+      items.set(`${entry.domain}#${entry.pipelineVersion}`, entry)
+    },
   }
 }

@@ -16,6 +16,7 @@ export interface RunStoreEnv {
   AWS_REGION: string
   TABLE_RUNS: string
   TABLE_RUN_EVENTS: string
+  TABLE_ANALYSES: string
   SQS_RUNS_QUEUE_URL: string
   DYNAMODB_ENDPOINT?: string | undefined
 }
@@ -171,7 +172,30 @@ export interface CreateRunInput {
 
 export interface RunEngineService {
   createRun(input: CreateRunInput): Promise<RunRecord>
+  // A finished run filled from saved events (a cache hit): no queue, no pipeline.
+  createReplayedRun(input: CreateRunInput, events: RunEventBody[]): Promise<RunRecord>
   executeRun(job: RunJobMessage): Promise<void>
+}
+
+// A completed analysis kept for 30 days per (domain, pipelineVersion), replayed instead of running the pipeline again.
+export interface CachedAnalysis {
+  domain: string
+  pipelineVersion: string
+  sourceRunId: string
+  // The source run's events, without its end event.
+  events: RunEvent[]
+  createdAt: string
+  expiresAt: string
+}
+
+export interface AnalysisCacheRepository {
+  get(domain: string, pipelineVersion: string): Promise<CachedAnalysis | undefined>
+  put(entry: CachedAnalysis): Promise<void>
+}
+
+export interface AnalysisCacheService {
+  // Saves a finished analysis run's events; other run types and failed runs are ignored.
+  saveFromRun(run: RunRecord): Promise<void>
 }
 
 export interface RunEventSink {
@@ -197,7 +221,7 @@ export interface RunStreamOptions {
 }
 
 export type StartAnalysisResult =
-  | { ok: true; runId: string; domain: string }
+  | { ok: true; runId: string; domain: string; cached: boolean }
   | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analyses_disabled' }
 
 export interface AnalysisService {

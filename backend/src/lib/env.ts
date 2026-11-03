@@ -14,6 +14,7 @@ const runStoreEnvSchema = z.object({
   AWS_REGION: z.string().min(1),
   TABLE_RUNS: z.string().min(1),
   TABLE_RUN_EVENTS: z.string().min(1),
+  TABLE_ANALYSES: z.string().min(1),
   SQS_RUNS_QUEUE_URL: z.url(),
   // Local development and tests only (DynamoDB Local). Unset in AWS.
   DYNAMODB_ENDPOINT: z.url().optional(),

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createRunEngineService } from '../src/services/run-engine-service.js'
 import { createPipelineRegistry } from '../src/services/pipelines.js'
 import type { RunEvent } from '../src/types/index.js'
-import { VALID_DRAFT, fakeLlm, fakeSite, html, okJson } from './support/analysis-fakes.js'
+import { acmeAnalysisFakes } from './support/analysis-fakes.js'
 import { manualClock, memoryEvents, memoryQueue, memoryRuns } from './support/in-memory-run-store.js'
 
 const label = (event: RunEvent): string =>
@@ -19,22 +19,7 @@ describe('analysis pipeline through the run engine', () => {
     const queue = memoryQueue()
     const clock = manualClock()
     const pipelines = createPipelineRegistry({
-      siteFetch: fakeSite({
-        'https://acme.com/': html('Acme', 'Invoicing software for agencies. '.repeat(20), ['/pricing']), 'https://acme.com/pricing': html('Pricing', 'From INR 499'),
-        'https://billbook.in/': html('Billbook', 'GST invoicing for small businesses. '.repeat(10)),
-        'https://invoiceit.com.br/': html('InvoiceIt', 'Faturamento para agências. '.repeat(10)),
-      }),
-      llm: fakeLlm([
-        okJson(VALID_DRAFT),
-        okJson({ competitors: [
-          { domain: 'billbook.in', name: 'Billbook', reason: 'GST invoicing', hqCountry: 'IN' },
-          { domain: 'invoiceit.com.br', name: 'InvoiceIt', reason: 'Invoicing', hqCountry: 'IN' },
-        ] }),
-        okJson({ segments: ['Design agencies', 'Marketing agencies', 'IT consultancies', 'Freelance studios'].map((name, i) => ({
-          name, useCase: 'Send invoices', pain: 'Late payments', criteria: ['Bills clients monthly', 'Under 50 staff'], buyerTitles: ['Founder', 'Finance Manager'],
-          industries: ['marketing_advertising'], employeeMin: 2, employeeMax: 50, countries: ['IN'], keywords: ['agency'], technologies: [], sharePct: 40 - i * 10,
-        })) }),
-      ]),
+      ...acmeAnalysisFakes(),
       models: { smart: 's', fast: 'f' },
       clock,
     })

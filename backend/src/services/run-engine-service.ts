@@ -23,6 +23,8 @@ export interface RunEngineDeps {
   pipelines: PipelineRegistry
   clock: Clock
   newId: () => string
+  // Called after a run completes successfully (the worker saves analyses to the cache). Its failure never fails the run.
+  onRunDone?: (run: RunRecord) => Promise<void>
 }
 
 interface EventRecorder {
@@ -87,6 +89,17 @@ async function finishRun(deps: RunEngineDeps, run: RunRecord, recorder: EventRec
   await recorder.record({ kind: 'end', status, ...(error ? { error } : {}) })
   await deps.runs.setStatus(run.runId, status, deps.clock.now().toISOString(), error)
   logInfo('run finished', { runId: run.runId, type: run.type, status })
+  if (!error) await notifyRunDone(deps, run)
+}
+
+async function notifyRunDone(deps: RunEngineDeps, run: RunRecord): Promise<void> {
+  if (!deps.onRunDone) return
+  try {
+    await deps.onRunDone(run)
+  } catch (error) {
+    logError('after-run hook failed', error, { runId: run.runId })
+    captureError(error, { runId: run.runId })
+  }
 }
 
 async function executeRun(deps: RunEngineDeps, job: RunJobMessage): Promise<void> {
@@ -125,9 +138,28 @@ async function createRun(deps: RunEngineDeps, input: CreateRunInput): Promise<Ru
   return run
 }
 
+// Writes saved events into a new run and finishes it, without the queue or a pipeline. Each event gets a new seq and ts.
+async function createReplayedRun(deps: RunEngineDeps, input: CreateRunInput, events: RunEventBody[]): Promise<RunRecord> {
+  const now = deps.clock.now().toISOString()
+  const run: RunRecord = { runId: deps.newId(), status: 'running', createdAt: now, updatedAt: now, ...input }
+  await deps.runs.create(run)
+  try {
+    const recorder = await createRecorder(deps, run.runId)
+    for (const event of events) await recorder.record(event)
+    await recorder.record({ kind: 'end', status: 'done' })
+  } catch (error) {
+    await deps.runs.setStatus(run.runId, 'failed', deps.clock.now().toISOString(), { code: 'replay_failed', message: 'The saved analysis could not be loaded' })
+    throw error
+  }
+  const updatedAt = deps.clock.now().toISOString()
+  await deps.runs.setStatus(run.runId, 'done', updatedAt)
+  return { ...run, status: 'done', updatedAt }
+}
+
 export function createRunEngineService(deps: RunEngineDeps): RunEngineService {
   return {
     createRun: (input) => createRun(deps, input),
+    createReplayedRun: (input, events) => createReplayedRun(deps, input, events),
     executeRun: (job) => executeRun(deps, job),
   }
 }

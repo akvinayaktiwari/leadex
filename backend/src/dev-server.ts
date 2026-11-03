@@ -7,6 +7,6 @@ import { createApp } from './routes/index.js'
 const DEFAULT_PORT = 8787
 const port = Number(process.env.PORT ?? DEFAULT_PORT)
 
-serve({ fetch: createApp(createApiServices(createRunStore(getRunStoreEnv()), getApiEnv().PUBLIC_ANALYSES_ENABLED)).fetch, port }, (info) => {
+serve({ fetch: createApp(createApiServices(createRunStore(getRunStoreEnv()), { enabled: getApiEnv().PUBLIC_ANALYSES_ENABLED, pipelineVersion: getApiEnv().PIPELINE_VERSION })).fetch, port }, (info) => {
   logInfo('dev server listening', { port: info.port })
 })

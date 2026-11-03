@@ -64,3 +64,25 @@ export const VALID_DRAFT = {
   pricingSignals: [{ text: 'free trial', sourceUrl: 'https://acme.com/pricing' }, { text: 'from INR 499 per month', sourceUrl: 'https://acme.com/pricing' }],
   servedMarkets: ['IN'],
 }
+
+// A site, two competitors and four segments: everything one analysis of acme.com needs, with call counters.
+export function acmeAnalysisFakes(): { siteFetch: FakeSite; llm: FakeLlm } {
+  return {
+    siteFetch: fakeSite({
+      'https://acme.com/': html('Acme', 'Invoicing software for agencies. '.repeat(20), ['/pricing']), 'https://acme.com/pricing': html('Pricing', 'From INR 499'),
+      'https://billbook.in/': html('Billbook', 'GST invoicing for small businesses. '.repeat(10)),
+      'https://invoiceit.com.br/': html('InvoiceIt', 'Faturamento para agências. '.repeat(10)),
+    }),
+    llm: fakeLlm([
+      okJson(VALID_DRAFT),
+      okJson({ competitors: [
+        { domain: 'billbook.in', name: 'Billbook', reason: 'GST invoicing', hqCountry: 'IN' },
+        { domain: 'invoiceit.com.br', name: 'InvoiceIt', reason: 'Invoicing', hqCountry: 'IN' },
+      ] }),
+      okJson({ segments: ['Design agencies', 'Marketing agencies', 'IT consultancies', 'Freelance studios'].map((name, i) => ({
+        name, useCase: 'Send invoices', pain: 'Late payments', criteria: ['Bills clients monthly', 'Under 50 staff'], buyerTitles: ['Founder', 'Finance Manager'],
+        industries: ['marketing_advertising'], employeeMin: 2, employeeMax: 50, countries: ['IN'], keywords: ['agency'], technologies: [], sharePct: 40 - i * 10,
+      })) }),
+    ]),
+  }
+}
