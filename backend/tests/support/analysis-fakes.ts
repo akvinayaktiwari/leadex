@@ -50,11 +50,17 @@ export function fakeLlm(responses: LlmJsonResponse[]): FakeLlm {
   return llm
 }
 
+const HOME = 'https://acme.com/'
+
 export const VALID_DRAFT = {
   name: 'Acme Invoicing',
-  oneLiner: 'Invoicing software for small agencies in India',
-  valueProps: ['Send GST invoices in seconds', 'Automatic payment reminders', 'UPI and card payments'],
-  category: 'invoicing software for small businesses',
-  pricingSignals: ['free trial', 'from INR 499 per month'],
+  oneLiner: { text: 'Invoicing software for small agencies in India', sourceUrl: HOME },
+  valueProps: [
+    { text: 'Send GST invoices in seconds', sourceUrl: HOME },
+    { text: 'Automatic payment reminders', sourceUrl: HOME },
+    { text: 'UPI and card payments', sourceUrl: 'https://acme.com/not-crawled' },
+  ],
+  category: { text: 'invoicing software for small businesses', sourceUrl: HOME },
+  pricingSignals: [{ text: 'free trial', sourceUrl: 'https://acme.com/pricing' }, { text: 'from INR 499 per month', sourceUrl: 'https://acme.com/pricing' }],
   servedMarkets: ['IN'],
 }

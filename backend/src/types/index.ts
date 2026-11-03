@@ -8,6 +8,8 @@ export interface ApiEnv {
   FRONTEND_URL: string
   PIPELINE_VERSION: string
   SENTRY_DSN?: string | undefined
+  // Anonymous analyses cost model calls; off until #7 adds rate limits, Turnstile and the domain cache.
+  PUBLIC_ANALYSES_ENABLED: boolean
 }
 
 export interface RunStoreEnv {
@@ -194,8 +196,17 @@ export interface RunStreamOptions {
   pageSize: number
 }
 
+export type StartAnalysisResult =
+  | { ok: true; runId: string; domain: string }
+  | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analyses_disabled' }
+
+export interface AnalysisService {
+  start(url: string): Promise<StartAnalysisResult>
+}
+
 export interface ApiServices {
   runStream: RunStreamService
+  analyses: AnalysisService
 }
 
 export type SentryRuntime = 'api' | 'stream' | 'worker' | 'ingest'
@@ -222,6 +233,15 @@ export interface LayerViolation {
 
 // ---- Analysis pipeline ----
 
+export type ProfileClaimField = 'oneLiner' | 'category' | 'valueProp' | 'pricingSignal'
+
+// A product claim with the crawled page it came from ('' when the model cited no page we read).
+export interface ProfileClaim {
+  field: ProfileClaimField
+  text: string
+  sourceUrl: string
+}
+
 export interface ProductProfile {
   domain: string
   name: string
@@ -231,6 +251,10 @@ export interface ProductProfile {
   pricingSignals: string[]
   // ISO-3166 alpha-2 codes, or ['GLOBAL'].
   servedMarkets: string[]
+  // Every claim above with its source page, shown next to the claim in the UI.
+  claims: ProfileClaim[]
+  // When the site was read.
+  crawledAt: string
 }
 
 export interface CrawledPage {
@@ -249,6 +273,7 @@ export interface CrawledSite {
   pages: CrawledPage[]
   blockedByRobots: number
   failedPages: number
+  fetchedAt: string
 }
 
 export interface Competitor {

@@ -9,7 +9,7 @@ const FILLER = ' We plan campaigns, write ad creatives, manage budgets and repor
 
 const QDNCO: ProductProfile = {
   domain: 'qdnco.com', name: 'QD & Co.', oneLiner: 'Real estate performance marketing in Bangalore and Dubai', valueProps: ['a', 'b', 'c'],
-  category: 'real estate marketing agency', pricingSignals: [], servedMarkets: ['IN', 'AE'],
+  category: 'real estate marketing agency', pricingSignals: [], servedMarkets: ['IN', 'AE'], claims: [], crawledAt: '2026-11-02T10:00:00.000Z',
 }
 
 const proposal = (domain: string, hqCountry: string, name = domain) => ({ domain, name, reason: 'Real estate ads agency', hqCountry })

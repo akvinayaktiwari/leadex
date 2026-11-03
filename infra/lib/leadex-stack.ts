@@ -21,6 +21,8 @@ export interface LeadexStackProps extends StackProps {
   pipelineVersion: string
   llmModels: { smart: string; fast: string }
   sentryDsn?: string
+  // Lets anyone start a website analysis. Off by default until #7 adds rate limits, Turnstile and the domain cache.
+  publicAnalysesEnabled?: boolean
   // Turns on the daily Leadex Data import schedule. Off by default; sources land in #22/#23.
   ingestEnabled?: boolean
   // Common Crawl domain-ranks file of the release to import, and how many domains to keep from it.
@@ -136,6 +138,7 @@ export class LeadexStack extends Stack {
       SQS_RUNS_QUEUE_URL: queue.queueUrl,
       KMS_KEY_ID: key.keyId,
       LEAD_BUILDS_ENABLED: 'false',
+      PUBLIC_ANALYSES_ENABLED: String(props.publicAnalysesEnabled ?? false),
       ...(props.sentryDsn ? { SENTRY_DSN: props.sentryDsn } : {}),
     }
     for (const [envName, table] of tables) environment[envName] = table.tableName

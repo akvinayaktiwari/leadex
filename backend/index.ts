@@ -7,4 +7,4 @@ import { createApp } from './src/routes/index.js'
 
 initSentry('api', getApiEnv())
 
-export const handler = handle(createApp(createApiServices(createRunStore(getRunStoreEnv()))))
+export const handler = handle(createApp(createApiServices(createRunStore(getRunStoreEnv()), getApiEnv().PUBLIC_ANALYSES_ENABLED)))

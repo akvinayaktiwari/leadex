@@ -9,4 +9,4 @@ import { createApp } from './src/routes/index.js'
 
 initSentry('stream', getApiEnv())
 
-export const streamingHandler = streamHandle(createApp(createApiServices(createRunStore(getRunStoreEnv()))))
+export const streamingHandler = streamHandle(createApp(createApiServices(createRunStore(getRunStoreEnv()), getApiEnv().PUBLIC_ANALYSES_ENABLED)))

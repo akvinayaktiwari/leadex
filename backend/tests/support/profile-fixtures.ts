@@ -7,7 +7,7 @@ export function crawledPage(path: string, text: string, signals: Partial<PageSig
 }
 
 export function crawledSite(pages: CrawledPage[]): CrawledSite {
-  return { domain: 'acme.com', origin: 'https://acme.com', pages, blockedByRobots: 0, failedPages: 0 }
+  return { domain: 'acme.com', origin: 'https://acme.com', pages, blockedByRobots: 0, failedPages: 0, fetchedAt: '2026-11-02T10:00:00.000Z' }
 }
 
 // A draft citing the homepage for everything and placing the company in Bengaluru, India, by a quote on /contact.

@@ -11,7 +11,7 @@ function page(path: string, text: string): CrawledPage {
 }
 
 function stateWithSite(pages: CrawledPage[] = [page('/', 'Invoicing for agencies')]): AnalysisState {
-  return { site: { domain: 'acme.com', origin: 'https://acme.com', pages, blockedByRobots: 0, failedPages: 0 } }
+  return { site: { domain: 'acme.com', origin: 'https://acme.com', pages, blockedByRobots: 0, failedPages: 0, fetchedAt: '2026-11-02T10:00:00.000Z' } }
 }
 
 async function run(responses: Parameters<typeof fakeLlm>[0], state = stateWithSite()) {
@@ -23,12 +23,22 @@ async function run(responses: Parameters<typeof fakeLlm>[0], state = stateWithSi
 }
 
 describe('profile step', () => {
-  // protects=a valid model answer becomes the ProductProfile artifact with the crawled domain, using the fast model at low effort;
-  // fails_when=the domain comes from the model, the artifact is not emitted, or the wrong model/effort is used;
-  // no_claim=does not judge profile quality (eval harness, #13).
-  it('emits a profile artifact from a valid answer', async () => {
-    const { llm, emitted, state } = await run([okJson(VALID_DRAFT)])
-    expect(state.profile).toEqual({ domain: 'acme.com', ...VALID_DRAFT })
+  // protects=a valid model answer becomes the ProductProfile artifact with the crawled domain and crawl time, plain fields for
+  // later steps, and every claim with its source page; a cited page we did not crawl becomes '' (shown as "no source");
+  // fails_when=the domain comes from the model, a claim keeps a URL we never read, or the artifact is not emitted;
+  // no_claim=does not judge profile quality (eval harness, #15).
+  it('emits a profile artifact with sourced claims', async () => {
+    const pages = [page('/', 'Invoicing for agencies'), page('/pricing', 'Free trial, from INR 499')]
+    const { llm, emitted, state } = await run([okJson(VALID_DRAFT)], stateWithSite(pages))
+    expect(state.profile).toMatchObject({
+      domain: 'acme.com', name: 'Acme Invoicing', oneLiner: 'Invoicing software for small agencies in India', category: 'invoicing software for small businesses',
+      valueProps: ['Send GST invoices in seconds', 'Automatic payment reminders', 'UPI and card payments'], pricingSignals: ['free trial', 'from INR 499 per month'],
+      servedMarkets: ['IN'], crawledAt: '2026-11-02T10:00:00.000Z',
+    })
+    expect(state.profile?.claims.map((claim) => `${claim.field}:${claim.sourceUrl}`)).toEqual([
+      'oneLiner:https://acme.com/', 'category:https://acme.com/', 'valueProp:https://acme.com/', 'valueProp:https://acme.com/', 'valueProp:',
+      'pricingSignal:https://acme.com/pricing', 'pricingSignal:https://acme.com/pricing',
+    ])
     expect(emitted).toEqual([{ kind: 'artifact', step: 'profile', artifact: 'profile', data: state.profile }])
     expect(llm.requests[0]).toMatchObject({ model: 'model-fast', effort: 'low' })
     expect(llm.requests[0]?.turns[0]?.text).toContain('<page url="https://acme.com/"')
@@ -38,14 +48,14 @@ describe('profile step', () => {
   // fails_when=invalid output is accepted, no repair is tried, or the repair lacks the error list;
   // no_claim=does not prove a real model fixes its output on repair.
   it('repairs an invalid answer once', async () => {
-    const tooLong = { ...VALID_DRAFT, oneLiner: 'x'.repeat(200), servedMarkets: ['India'] }
+    const tooLong = { ...VALID_DRAFT, oneLiner: { text: 'x'.repeat(200), sourceUrl: '' }, servedMarkets: ['India'] }
     const { llm, state } = await run([okJson(tooLong), okJson(VALID_DRAFT)])
     expect(llm.requests).toHaveLength(2)
     const repair = llm.requests[1]?.turns ?? []
     expect(repair.map((turn) => turn.role)).toEqual(['user', 'assistant', 'user'])
     expect(repair[2]?.text).toContain('oneLiner')
     expect(repair[2]?.text).toContain('servedMarkets.0')
-    expect(state.profile?.oneLiner).toBe(VALID_DRAFT.oneLiner)
+    expect(state.profile?.oneLiner).toBe(VALID_DRAFT.oneLiner.text)
   })
 
   // protects=a second invalid answer fails the step with profile_invalid, and a refusal fails at once with llm_refused;
