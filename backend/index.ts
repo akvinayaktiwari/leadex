@@ -8,6 +8,6 @@ import { createApp } from './src/routes/index.js'
 initSentry('api', getApiEnv())
 
 const store = createRunStore(getRunStoreEnv())
-const analyses = createAnalyses(store, getApiEnv(), getRunStoreEnv())
+const analyses = await createAnalyses(store, getApiEnv(), getRunStoreEnv())
 // The Function URL is called directly by browsers, so the source IP is the caller's.
 export const handler = handle(createApp(createApiServices(store, analyses), (c) => getConnInfo(c).remote.address))

@@ -1,5 +1,5 @@
-// Starts a free analysis for a pasted website (#6). Anonymous callers get a few per day per IP and per device (#7),
-// and a completed analysis of the same domain and pipeline version from the last 30 days is replayed, not run again.
+// Starts a free analysis for a pasted website (#6). Each request needs a Turnstile token, anonymous callers get a few
+// per day per IP and per device (#7), and a completed analysis of the same domain and pipeline version from the last 30 days is replayed, not run again.
 import { normalizeDomain } from '../lib/domain.js'
 import { anonymousLimitKeys } from '../lib/rate-limit-keys.js'
 import type {
@@ -11,6 +11,7 @@ import type {
   RunRecord,
   StartAnalysisRequest,
   StartAnalysisResult,
+  TurnstileRepository,
 } from '../types/index.js'
 
 // Counters outlive their UTC day by a day, then DynamoDB deletes them.
@@ -20,9 +21,15 @@ export interface AnalysisServiceDeps {
   runEngine: Pick<RunEngineService, 'createRun' | 'createReplayedRun'>
   cache: AnalysisCacheRepository
   rateLimits: RateLimitRepository
+  turnstile: TurnstileRepository
   clock: Clock
   pipelineVersion: string
   dailyLimit: number
+}
+
+// Checked before the limits, so a bot's failed attempts never use up a person's quota.
+async function passesTurnstile(deps: AnalysisServiceDeps, request: StartAnalysisRequest): Promise<boolean> {
+  return request.turnstileToken ? deps.turnstile.verify(request.turnstileToken, request.ip) : false
 }
 
 function withinLimits(deps: AnalysisServiceDeps, request: StartAnalysisRequest): Promise<boolean> {
@@ -43,6 +50,7 @@ export function createAnalysisService(deps: AnalysisServiceDeps): AnalysisServic
     async start(request: StartAnalysisRequest): Promise<StartAnalysisResult> {
       const normalized = normalizeDomain(request.url)
       if (!normalized.ok) return { ok: false, code: normalized.reason }
+      if (!(await passesTurnstile(deps, request))) return { ok: false, code: 'turnstile_failed' }
       if (!(await withinLimits(deps, request))) return { ok: false, code: 'rate_limited' }
       const replayed = await replayFromCache(deps, normalized.domain)
       if (replayed) return { ok: true, runId: replayed.runId, domain: replayed.domain, cached: true }

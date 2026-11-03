@@ -9,7 +9,7 @@ const DEFAULT_PORT = 8787
 const port = Number(process.env.PORT ?? DEFAULT_PORT)
 
 const store = createRunStore(getRunStoreEnv())
-const app = createApp(createApiServices(store, createAnalyses(store, getApiEnv(), getRunStoreEnv())), (c) => getConnInfo(c).remote.address)
+const app = createApp(createApiServices(store, await createAnalyses(store, getApiEnv(), getRunStoreEnv())), (c) => getConnInfo(c).remote.address)
 
 serve({ fetch: app.fetch, port }, (info) => {
   logInfo('dev server listening', { port: info.port })

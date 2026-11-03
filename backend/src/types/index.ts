@@ -227,11 +227,13 @@ export interface StartAnalysisRequest {
   ip: string
   // A random id the browser keeps; a second, weaker limit than the IP.
   deviceId?: string | undefined
+  // Cloudflare Turnstile token from the form; required.
+  turnstileToken?: string | undefined
 }
 
 export type StartAnalysisResult =
   | { ok: true; runId: string; domain: string; cached: boolean }
-  | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analyses_disabled' | 'rate_limited' }
+  | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analyses_disabled' | 'turnstile_failed' | 'rate_limited' }
 
 export interface AnalysisService {
   start(request: StartAnalysisRequest): Promise<StartAnalysisResult>
@@ -242,10 +244,24 @@ export interface RateLimitRepository {
   consume(keys: string[], limit: number, expiresAt: string): Promise<boolean>
 }
 
+export interface TurnstileRepository {
+  // True only when Cloudflare confirms the token. Throws if Cloudflare cannot be reached.
+  verify(token: string, ip: string): Promise<boolean>
+}
+
+export interface SecretsRepository {
+  // One field of a JSON secret (the stage's app secret).
+  readField(secretId: string, field: string): Promise<string>
+}
+
 // Read only when PUBLIC_ANALYSES_ENABLED is true.
 export interface AnalysesEnv {
   TABLE_RATE_LIMITS: string
   ANONYMOUS_ANALYSES_PER_DAY: number
+  TURNSTILE_VERIFY_URL: string
+  // Local development sets the secret directly; in AWS it is read from the app secret named APP_SECRET_ID.
+  TURNSTILE_SECRET?: string | undefined
+  APP_SECRET_ID?: string | undefined
 }
 
 export type ClientIpReader = (c: Context) => string | undefined

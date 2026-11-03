@@ -6,6 +6,8 @@ import { createDocumentClient } from './lib/dynamo-client.js'
 import { getAnalysesEnv } from './lib/env.js'
 import { createSqsClient } from './lib/sqs-client.js'
 import { createAnalysisCacheTableRepository } from './repositories/analysis-cache-table-repository.js'
+import { createSecretsRepository } from './repositories/secrets-repository.js'
+import { createTurnstileRepository } from './repositories/turnstile-repository.js'
 import { createRateLimitsTableRepository } from './repositories/rate-limits-table-repository.js'
 import { createRunEventsTableRepository } from './repositories/run-events-table-repository.js'
 import { createRunQueueRepository } from './repositories/run-queue-repository.js'
@@ -14,6 +16,7 @@ import { DISABLED_ANALYSIS_SERVICE, createAnalysisService } from './services/ana
 import { createRunEngineService } from './services/run-engine-service.js'
 import { RUN_STREAM_DEFAULTS, createRunStreamService } from './services/run-stream-service.js'
 import type {
+  AnalysesEnv,
   AnalysisCacheRepository,
   AnalysisService,
   ApiEnv,
@@ -42,8 +45,15 @@ export function createRunStore(env: RunStoreEnv): RunStore {
 }
 
 // The API only creates runs (the worker executes them), so the run engine here has no pipelines.
-// Analyses are built only when enabled; their settings (rate-limit table, daily limit) are read only then.
-export function createAnalyses(store: RunStore, apiEnv: ApiEnv, storeEnv: RunStoreEnv): AnalysisService {
+// In AWS the Turnstile secret comes from the stage's app secret, never from the Lambda's plain environment.
+async function turnstileSecret(env: AnalysesEnv, region: string): Promise<string> {
+  if (env.TURNSTILE_SECRET) return env.TURNSTILE_SECRET
+  if (!env.APP_SECRET_ID) throw new Error('TURNSTILE_SECRET or APP_SECRET_ID is required')
+  return createSecretsRepository(region).readField(env.APP_SECRET_ID, 'TURNSTILE_SECRET')
+}
+
+// Analyses are built only when enabled; their settings (rate limits, Turnstile) are read only then.
+export async function createAnalyses(store: RunStore, apiEnv: ApiEnv, storeEnv: RunStoreEnv): Promise<AnalysisService> {
   if (!apiEnv.PUBLIC_ANALYSES_ENABLED) return DISABLED_ANALYSIS_SERVICE
   const env = getAnalysesEnv()
   const documentClient = createDocumentClient(storeEnv.AWS_REGION, storeEnv.DYNAMODB_ENDPOINT)
@@ -51,6 +61,7 @@ export function createAnalyses(store: RunStore, apiEnv: ApiEnv, storeEnv: RunSto
     runEngine: createRunEngineService({ ...store, pipelines: {}, clock: systemClock, newId: newRunId }),
     cache: store.analysisCache,
     rateLimits: createRateLimitsTableRepository(documentClient, env.TABLE_RATE_LIMITS),
+    turnstile: createTurnstileRepository(env.TURNSTILE_VERIFY_URL, await turnstileSecret(env, storeEnv.AWS_REGION)),
     clock: systemClock,
     pipelineVersion: apiEnv.PIPELINE_VERSION,
     dailyLimit: env.ANONYMOUS_ANALYSES_PER_DAY,

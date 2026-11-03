@@ -23,7 +23,10 @@ const runStoreEnvSchema = z.object({
 const analysesEnvSchema = z.object({
   TABLE_RATE_LIMITS: z.string().min(1),
   ANONYMOUS_ANALYSES_PER_DAY: z.coerce.number().int().min(1).max(1_000).default(3),
-}) satisfies z.ZodType<AnalysesEnv, Record<string, unknown>>
+  TURNSTILE_VERIFY_URL: z.url(),
+  TURNSTILE_SECRET: z.string().min(1).optional(),
+  APP_SECRET_ID: z.string().min(1).optional(),
+}).refine((env) => env.TURNSTILE_SECRET || env.APP_SECRET_ID, { path: ['TURNSTILE_SECRET'], message: 'set TURNSTILE_SECRET or APP_SECRET_ID' }) satisfies z.ZodType<AnalysesEnv, Record<string, unknown>>
 
 const workerEnvSchema = apiEnvSchema.extend(runStoreEnvSchema.shape).extend({
   ANTHROPIC_API_KEY: z.string().min(1),

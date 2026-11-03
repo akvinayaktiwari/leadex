@@ -3,6 +3,7 @@ import type {
   CachedAnalysis,
   Clock,
   RateLimitRepository,
+  TurnstileRepository,
   RunErrorInfo,
   RunEvent,
   RunEventsRepository,
@@ -151,4 +152,20 @@ export function memoryRateLimits(): MemoryRateLimits {
       return true
     },
   }
+}
+
+export interface FakeTurnstile extends TurnstileRepository {
+  checked: string[]
+}
+
+// Accepts only the token 'ok'.
+export function fakeTurnstile(): FakeTurnstile {
+  const turnstile: FakeTurnstile = {
+    checked: [],
+    async verify(token: string): Promise<boolean> {
+      turnstile.checked.push(token)
+      return token === 'ok'
+    },
+  }
+  return turnstile
 }

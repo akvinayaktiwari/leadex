@@ -3,16 +3,21 @@ import { z } from 'zod'
 import { errorBody } from '../lib/http-errors.js'
 import type { ApiServices, ClientIpReader } from '../types/index.js'
 
-const startBody = z.object({ url: z.string().min(1).max(2_000), deviceId: z.string().min(8).max(100).optional() })
+const startBody = z.object({
+  url: z.string().min(1).max(2_000),
+  deviceId: z.string().min(8).max(100).optional(),
+  turnstileToken: z.string().max(4_096).optional(),
+})
 
 const MESSAGES = {
   invalid_url: 'Enter a website like yourcompany.com',
   unsupported_host: 'That address is not a public company website',
   analyses_disabled: 'Analyses are not open yet',
+  turnstile_failed: 'Please confirm you are human and try again',
   rate_limited: 'You have used today\'s free analyses. Try again tomorrow.',
 } as const
 
-const STATUS = { invalid_url: 400, unsupported_host: 400, analyses_disabled: 503, rate_limited: 429 } as const
+const STATUS = { invalid_url: 400, unsupported_host: 400, analyses_disabled: 503, turnstile_failed: 400, rate_limited: 429 } as const
 
 const clientIp = (c: Context, readClientIp: ClientIpReader): string => readClientIp(c) ?? 'unknown'
 

@@ -176,4 +176,29 @@ describe('LeadexStack', () => {
     expect([environment.get('GLEIF_API_URL'), environment.get('GLEIF_RECORD_URL_BASE'), environment.get('INGEST_GLEIF_MATCH_PER_RUN')])
       .toEqual(['https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest', 'https://search.gleif.org/#/record/', '2000'])
   })
+
+  // protects=public analyses need a Turnstile verify URL; when on, only the API Lambda gets it with the app secret's id and read
+  // access, and TURNSTILE_SECRET never appears as a plain environment value;
+  // fails_when=analyses deploy without Turnstile, the secret lands in the template, or the Lambda cannot read it;
+  // no_claim=does not check the secret holds TURNSTILE_SECRET (created by hand before deploy).
+  it('wires Turnstile only when analyses are public', () => {
+    const base = { stage: 'dev' as const, frontendUrl: 'http://localhost:3000', pipelineVersion: '1', llmModels: { smart: 's', fast: 'f' }, env: { account: '111111111111', region: 'ap-south-1' } }
+    const app = new App({ context: { 'aws:cdk:bundling-stacks': [] } })
+    expect(() => new LeadexStack(app, 'Leadex-no-turnstile', { ...base, publicAnalysesEnabled: true })).toThrow(/turnstileVerifyUrl/)
+    const stack = new LeadexStack(app, 'Leadex-public', { ...base, publicAnalysesEnabled: true, turnstileVerifyUrl: 'https://challenges.cloudflare.com/turnstile/v0/siteverify' })
+    const open = Template.fromStack(stack)
+    const variables = Object.values(open.findResources('AWS::Lambda::Function'))
+      .map((resource) => (resource.Properties.Environment?.Variables ?? {}) as Record<string, unknown>)
+      .filter((vars) => 'PUBLIC_ANALYSES_ENABLED' in vars)
+    const withTurnstile = variables.filter((vars) => 'TURNSTILE_VERIFY_URL' in vars)
+    expect(withTurnstile).toHaveLength(1)
+    expect(withTurnstile[0]).toMatchObject({ APP_SECRET_ID: 'leadex/dev/app', PUBLIC_ANALYSES_ENABLED: 'true' })
+    expect(variables.some((vars) => 'TURNSTILE_SECRET' in vars)).toBe(false)
+    open.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: { Statement: Match.arrayWith([Match.objectLike({ Action: Match.arrayWith(['secretsmanager:GetSecretValue']) })]) },
+    })
+    const closed = Object.values(template.findResources('AWS::Lambda::Function'))
+      .map((resource) => (resource.Properties.Environment?.Variables ?? {}) as Record<string, unknown>)
+    expect(closed.some((vars) => 'TURNSTILE_VERIFY_URL' in vars)).toBe(false)
+  })
 })

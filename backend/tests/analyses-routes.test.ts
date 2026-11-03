@@ -5,24 +5,27 @@ import { NO_CLIENT_IP } from './support/stub-services.js'
 import { DISABLED_ANALYSIS_SERVICE, createAnalysisService } from '../src/services/analysis-service.js'
 import { createRunEngineService } from '../src/services/run-engine-service.js'
 import type { ApiServices } from '../src/types/index.js'
-import { manualClock, memoryAnalysisCache, memoryEvents, memoryQueue, memoryRateLimits, memoryRuns } from './support/in-memory-run-store.js'
+import { fakeTurnstile, manualClock, memoryAnalysisCache, memoryEvents, memoryQueue, memoryRateLimits, memoryRuns } from './support/in-memory-run-store.js'
 
 function setup(enabled: boolean) {
   const runs = memoryRuns()
   const queue = memoryQueue()
   const clock = manualClock()
+  const rateLimits = memoryRateLimits()
+  const turnstile = fakeTurnstile()
   const runEngine = createRunEngineService({ runs, events: memoryEvents(), queue, pipelines: {}, clock, newId: () => (runs.items.size === 0 ? 'run_new' : `run_${runs.items.size + 1}`) })
   const services: ApiServices = {
     runStream: { authorize: () => Promise.reject(new Error('not used')), stream: () => Promise.reject(new Error('not used')) },
     analyses: enabled
-      ? createAnalysisService({ runEngine, cache: memoryAnalysisCache(), rateLimits: memoryRateLimits(), clock, pipelineVersion: '1', dailyLimit: 3 })
+      ? createAnalysisService({ runEngine, cache: memoryAnalysisCache(), rateLimits, turnstile, clock, pipelineVersion: '1', dailyLimit: 3 })
       : DISABLED_ANALYSIS_SERVICE,
   }
-  return { app: createApp(services, NO_CLIENT_IP), runs, queue, services, clock }
+  return { app: createApp(services, NO_CLIENT_IP), runs, queue, services, clock, rateLimits, turnstile }
 }
 
-const post = (app: ReturnType<typeof createApp>, body: unknown) =>
-  app.request('/api/analyses', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' }, body: JSON.stringify(body) })
+// Sends a valid Turnstile token unless the body sets its own.
+const post = (app: ReturnType<typeof createApp>, body: Record<string, unknown>) =>
+  app.request('/api/analyses', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' }, body: JSON.stringify({ turnstileToken: 'ok', ...body }) })
 
 describe('POST /api/analyses', () => {
   beforeEach(() => {
@@ -100,5 +103,21 @@ describe('POST /api/analyses', () => {
     clock.advance(24 * 60 * 60 * 1000)
     ip = '203.0.113.7'
     expect((await post(app, { url: 'acme.com', deviceId: 'device-aaaa' })).status).toBe(202)
+  })
+
+  // protects=acceptance criterion 4: a missing or invalid Turnstile token gets 400 turnstile_failed, starts nothing and does not
+  // use up the caller's daily quota;
+  // fails_when=a request without a token runs (bots get free analyses), or failed attempts lock a person out for the day;
+  // no_claim=fake Turnstile; the siteverify call is tested in turnstile-repository.test.ts.
+  it('requires a valid Turnstile token', async () => {
+    const { app, queue, rateLimits, turnstile } = setup(true)
+    for (const turnstileToken of [undefined, 'forged']) {
+      const response = await post(app, { url: 'acme.com', turnstileToken })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ error: { code: 'turnstile_failed' } })
+    }
+    expect(turnstile.checked).toEqual(['forged'])
+    expect(queue.sent).toEqual([])
+    expect(rateLimits.counts.size).toBe(0)
   })
 })
