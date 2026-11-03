@@ -12,3 +12,5 @@ out/
 next-env.d.ts
 cdk.context.json
 backend/.smoke/
+test-results/
+playwright-report/
