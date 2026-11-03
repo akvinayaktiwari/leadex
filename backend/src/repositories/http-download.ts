@@ -8,8 +8,15 @@ export interface DownloadOptions {
   idleTimeoutMs: number
   // Interruptions in a row with no new bytes before giving up.
   maxRetries: number
+  // Wait before each resume: retryBaseMs, doubling per interruption in a row, capped at retryMaxMs. Without it a short
+  // outage (Wi-Fi, laptop sleep) used up every retry within milliseconds.
+  retryBaseMs: number
+  retryMaxMs: number
   signal?: AbortSignal | undefined
 }
+
+// Production retry policy: 8 interruptions in a row, waiting 1, 2, 4 … up to 60 s between them (about 3 minutes in all).
+export const RETRY_POLICY: Pick<DownloadOptions, 'maxRetries' | 'retryBaseMs' | 'retryMaxMs'> = { maxRetries: 8, retryBaseMs: 1_000, retryMaxMs: 60_000 }
 
 class StallError extends Error {
   constructor(url: string, idleTimeoutMs: number) {
@@ -65,6 +72,25 @@ async function* streamFrom(url: string, offset: number, options: DownloadOptions
   }
 }
 
+// Resolves after ms, or rejects at once if the download is cancelled meanwhile.
+function waitBeforeRetry(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+const retryDelayMs = (options: DownloadOptions, failuresInARow: number): number =>
+  Math.min(options.retryMaxMs, options.retryBaseMs * 2 ** (failuresInARow - 1))
+
 const isRetryable = (error: unknown): boolean => error instanceof StallError || (error instanceof TypeError && /fetch failed|terminated|socket/i.test(String(error.message) + String((error as { cause?: unknown }).cause ?? '')))
 
 // maxRetries counts interruptions in a row without new data: a long download on a flaky link that keeps making
@@ -84,7 +110,9 @@ export async function* resumableDownload(url: string, options: DownloadOptions):
       failures += 1
       offsetAtLastFailure = offset
       if (options.signal?.aborted || failures > options.maxRetries || !isRetryable(error)) throw error
-      logInfo('download interrupted, resuming', { url, offset, failuresInARow: failures, reason: error instanceof Error ? error.message : String(error) })
+      const delayMs = retryDelayMs(options, failures)
+      logInfo('download interrupted, resuming', { url, offset, failuresInARow: failures, delayMs, reason: error instanceof Error ? error.message : String(error) })
+      await waitBeforeRetry(delayMs, options.signal)
     }
   }
 }

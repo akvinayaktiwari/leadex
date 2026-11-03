@@ -1,10 +1,9 @@
 import { Readable, pipeline } from 'node:stream'
 import { createGunzip } from 'node:zlib'
 import type { DomainRankLine, DomainRanksSource } from '../types/index.js'
-import { resumableDownload } from './http-download.js'
+import { RETRY_POLICY, resumableDownload } from './http-download.js'
 
 const IDLE_TIMEOUT_MS = 30_000
-const MAX_RESUMES = 5
 
 // Columns of the domain-ranks file (tab-separated, header lines start with "#"):
 // #harmonicc_pos  #harmonicc_val  #pr_pos  #pr_val  #host_rev  #n_hosts
@@ -33,7 +32,7 @@ async function* splitLines(chunks: AsyncIterable<Buffer>): AsyncGenerator<string
 }
 
 async function* readGzipLines(url: string, userAgent: string, signal: AbortSignal): AsyncGenerator<string> {
-  const source = Readable.from(resumableDownload(url, { userAgent, idleTimeoutMs: IDLE_TIMEOUT_MS, maxRetries: MAX_RESUMES, signal }))
+  const source = Readable.from(resumableDownload(url, { userAgent, idleTimeoutMs: IDLE_TIMEOUT_MS, ...RETRY_POLICY, signal }))
   // pipeline forwards a download or gzip error to the stream we read, so the loop throws instead of hanging.
   const gunzip = pipeline(source, createGunzip(), () => {})
   try {

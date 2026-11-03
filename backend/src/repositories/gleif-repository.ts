@@ -3,7 +3,7 @@ import { createInflateRaw } from 'node:zlib'
 import { parse } from 'csv-parse'
 import { z } from 'zod'
 import type { GleifPublish, GleifRecord, GleifSource } from '../types/index.js'
-import { resumableDownload } from './http-download.js'
+import { RETRY_POLICY, resumableDownload } from './http-download.js'
 
 const LOCAL_HEADER_SIGNATURE = 0x04034b50
 const DEFLATE = 8
@@ -120,7 +120,6 @@ const publishSchema = z.object({
 })
 
 const IDLE_TIMEOUT_MS = 30_000
-const MAX_RESUMES = 5
 
 async function fetchJson(url: string, userAgent: string): Promise<unknown> {
   const response = await fetch(url, { headers: { 'user-agent': userAgent }, signal: AbortSignal.timeout(IDLE_TIMEOUT_MS) })
@@ -137,7 +136,7 @@ export function createGleifRepository(apiUrl: string, userAgent: string): GleifS
     },
     async *streamRecords(zipUrl: string): AsyncGenerator<GleifRecord> {
       const controller = new AbortController()
-      const bytes = resumableDownload(zipUrl, { userAgent, idleTimeoutMs: IDLE_TIMEOUT_MS, maxRetries: MAX_RESUMES, signal: controller.signal })
+      const bytes = resumableDownload(zipUrl, { userAgent, idleTimeoutMs: IDLE_TIMEOUT_MS, ...RETRY_POLICY, signal: controller.signal })
       // pipeline forwards download, zip and CSV errors to the parser we read, so the loop throws instead of hanging.
       const rows = pipeline(Readable.from(bytes), new FirstZipEntry(), createInflateRaw(), parse({ bom: true, relax_quotes: true }), () => {})
       try {
