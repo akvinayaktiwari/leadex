@@ -1,7 +1,8 @@
+import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ConnectionState, RunEvent, RunView } from '@/types'
 import { EMPTY_RUN, applyEvent } from './run-state'
-import { connectRunStream, streamUrlFor, type EventSourceLike } from './use-run-events'
+import { connectRunStream, streamUrlFor, useRunEvents, type EventSourceFactory, type EventSourceLike } from './use-run-events'
 
 const TS = '2026-11-02T10:00:00.000Z'
 const note = (seq: number): RunEvent => ({ seq, ts: TS, kind: 'agent_note', text: `note ${seq}` })
@@ -85,5 +86,19 @@ describe('run event stream', () => {
     const { sources, stop } = setup()
     stop()
     expect(sources[0]!.closed).toBe(true)
+  })
+
+  // protects=once the run has ended, the page does not open the stream again when its effect re-runs;
+  // fails_when=a re-run effect after the end connects with ?after=<last seq>, which a finished run answers by closing and the
+  // browser retries forever;
+  // no_claim=n/a.
+  it('does not reconnect a finished run when the effect runs again', () => {
+    const sources: FakeSource[] = []
+    const factory = (): EventSourceFactory => (url) => { const source = new FakeSource(url); sources.push(source); return source }
+    const { result, rerender } = renderHook(({ create }) => useRunEvents('run_1', 'https://stream.example', create), { initialProps: { create: factory() } })
+    act(() => sources[0]!.send({ seq: 1, ts: TS, kind: 'end', status: 'done' }))
+    expect(result.current.run.end?.status).toBe('done')
+    rerender({ create: factory() })
+    expect(sources).toHaveLength(1)
   })
 })

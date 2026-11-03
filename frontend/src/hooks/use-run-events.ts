@@ -84,16 +84,22 @@ export function connectRunStream(options: RunStreamOptions): () => void {
   }
 }
 
-export function useRunEvents(runId: string | undefined, streamBase: string, createSource: EventSourceFactory = browserEventSource): { run: RunView; connection: ConnectionState } {
+export function useRunEvents(runId: string | undefined, streamBase: string, createSource?: EventSourceFactory): { run: RunView; connection: ConnectionState } {
   const [run, dispatch] = useReducer(applyEvent, EMPTY_RUN)
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const lastSeq = useRef(0)
   lastSeq.current = run.lastSeq
+  const ended = useRef(false)
+  ended.current = run.end !== undefined
   useEffect(() => {
-    if (!runId) return undefined
+    // If a dependency changes after the end, don't reopen: a finished run's stream sends nothing and closes, which the
+    // browser would retry forever.
+    if (!runId || ended.current) return undefined
     return connectRunStream({
       url: (afterSeq) => streamUrlFor(streamBase, runId, afterSeq), lastSeq: () => lastSeq.current,
-      createSource, onEvent: dispatch, onConnection: setConnection,
+      // The default is chosen here, not as a parameter default: a minified build inlines it as a new function on every
+      // render, which made this effect close and reopen the stream on each event.
+      createSource: createSource ?? browserEventSource, onEvent: dispatch, onConnection: setConnection,
     })
   }, [runId, streamBase, createSource])
   return { run, connection }
