@@ -3,7 +3,9 @@
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { startAnalysis } from '@/services/api-client'
-import { TurnstileWidget } from './turnstile-widget'
+import { getPublicConfig } from '@/services/config'
+import { getDeviceId } from '@/services/device-id'
+import { TurnstileWidget, resetTurnstile, turnstileToken } from './turnstile-widget'
 
 const DOMAIN_PATTERN = /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(\/.*)?$/i
 
@@ -19,14 +21,20 @@ export function WebsiteForm() {
       setMessage('Enter a website like yourcompany.com')
       return
     }
+    const token = turnstileToken(event.currentTarget)
+    if (getPublicConfig().turnstileSiteKey && !token) {
+      setMessage('One moment: the human check below is still running')
+      return
+    }
     setBusy(true)
     setMessage('')
-    const result = await startAnalysis(url.trim())
+    const result = await startAnalysis(url.trim(), { deviceId: getDeviceId(), ...(token ? { turnstileToken: token } : {}) })
     if (result.ok) {
       router.push(`/analysis?run=${encodeURIComponent(result.runId)}&domain=${encodeURIComponent(result.domain)}`)
       return
     }
     setMessage(result.message)
+    resetTurnstile()
     setBusy(false)
   }
 

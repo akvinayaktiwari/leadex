@@ -19,12 +19,17 @@ interface ErrorBody {
   error?: { code?: string; message?: string }
 }
 
-export async function startAnalysis(url: string): Promise<StartAnalysisResult> {
+export interface StartAnalysisExtras {
+  deviceId?: string
+  turnstileToken?: string
+}
+
+export async function startAnalysis(url: string, extras: StartAnalysisExtras = {}): Promise<StartAnalysisResult> {
   const { apiUrl } = getPublicConfig()
   if (!apiUrl) return { ok: false, message: 'The app is not configured (NEXT_PUBLIC_API_URL is not set)' }
   try {
     const response = await fetch(`${apiUrl}/api/analyses`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify({ url }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify({ url, ...extras }),
     })
     if (response.status === 202) {
       const body = (await response.json()) as { runId: string; domain: string }

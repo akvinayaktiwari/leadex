@@ -41,6 +41,7 @@ const EVENTS = [
 
 const DROP_AFTER_SEQ = 8
 const streamRequests: { lastEventId: string | undefined; after: string | null }[] = []
+const analysisBodies: unknown[] = []
 let dropped = false
 
 function cors(response: ServerResponse): void {
@@ -80,6 +81,15 @@ function stream(request: IncomingMessage, response: ServerResponse, url: URL): v
   response.end()
 }
 
+function startAnalysis(request: IncomingMessage, response: ServerResponse): void {
+  let body = ''
+  request.on('data', (chunk: Buffer) => { body += chunk.toString() })
+  request.on('end', () => {
+    analysisBodies.push(JSON.parse(body))
+    response.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify({ runId: RUN_ID, domain: 'qdnco.com', cached: false }))
+  })
+}
+
 async function serveStatic(response: ServerResponse, pathname: string): Promise<void> {
   const clean = normalize(pathname).replace(/^(\.\.[/\\])+/, '')
   const candidates = clean.endsWith('/') ? [join(clean, 'index.html')] : [clean, `${clean}.html`]
@@ -100,8 +110,9 @@ createServer((request, response) => {
   const url = new URL(request.url ?? '/', `http://127.0.0.1:${PORT}`)
   cors(response)
   if (request.method === 'OPTIONS') return void response.writeHead(204).end()
-  if (url.pathname === '/api/analyses' && request.method === 'POST') return void response.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify({ runId: RUN_ID, domain: 'qdnco.com' }))
+  if (url.pathname === '/api/analyses' && request.method === 'POST') return void startAnalysis(request, response)
   if (url.pathname === `/api/runs/${RUN_ID}/events`) return stream(request, response, url)
+  if (url.pathname === '/__e2e/analysis-bodies') return void response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(analysisBodies))
   if (url.pathname === '/__e2e/stream-requests') return void response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(streamRequests))
   void serveStatic(response, url.pathname)
 }).listen(PORT, '127.0.0.1', () => console.log(`fake backend on http://127.0.0.1:${PORT}`))
