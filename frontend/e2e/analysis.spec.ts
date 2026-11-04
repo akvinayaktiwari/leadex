@@ -22,6 +22,10 @@ test('analysis streams, survives a drop and shows each card once', async ({ page
   await expect(page.getByText('Read 6 pages from qdnco.com')).toHaveCount(1)
   await expect(page.locator('.step')).toHaveCount(4)
 
+  // The form sent the browser's device id (no Turnstile site key in this build, so no token).
+  const bodies = (await (await request.get('/__e2e/analysis-bodies')).json()) as { url: string; deviceId?: string }[]
+  expect(bodies).toEqual([{ url: 'https://qdnco.com', deviceId: expect.stringMatching(/^[0-9a-f-]{36}$/) }])
+
   // One stream for the page, resumed by the browser after the drop with Last-Event-ID, and nothing reopened after the end.
   const streamRequests = (await (await request.get('/__e2e/stream-requests')).json()) as { lastEventId?: string; after: string | null }[]
   expect(streamRequests.filter((r) => !r.lastEventId && !r.after)).toHaveLength(1)

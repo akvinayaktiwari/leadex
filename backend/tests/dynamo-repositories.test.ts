@@ -8,7 +8,7 @@ import { createApp } from '../src/routes/index.js'
 import { createRunEngineService } from '../src/services/run-engine-service.js'
 import { RUN_STREAM_DEFAULTS, createRunStreamService } from '../src/services/run-stream-service.js'
 import type { RunEvent } from '../src/types/index.js'
-import { DISABLED_ANALYSES } from './support/stub-services.js'
+import { DISABLED_ANALYSES, NO_CLIENT_IP } from './support/stub-services.js'
 import { manualClock, memoryQueue, sampleRun } from './support/in-memory-run-store.js'
 
 // Runs against DynamoDB Local: `docker run -p 8000:8000 amazon/dynamodb-local:2.6.1`,
@@ -124,7 +124,7 @@ describe.runIf(ENDPOINT)('DynamoDB run repositories', () => {
     await engine.executeRun(job)
 
     const runStream = createRunStreamService({ runs, events, clock: manualClock(), sleep: async () => {}, options: RUN_STREAM_DEFAULTS })
-    const response = await createApp({ runStream, analyses: DISABLED_ANALYSES }).request(`/api/runs/${run.runId}/events`, { headers: { 'Last-Event-ID': '1' } })
+    const response = await createApp({ runStream, analyses: DISABLED_ANALYSES }, NO_CLIENT_IP).request(`/api/runs/${run.runId}/events`, { headers: { 'Last-Event-ID': '1' } })
     const kinds = (await response.text()).split('\n').filter((line) => line.startsWith('event: ')).map((line) => line.slice(7))
     expect(kinds).toEqual(['agent_note', 'step', 'end'])
     expect(await runs.get(run.runId)).toMatchObject({ status: 'done' })

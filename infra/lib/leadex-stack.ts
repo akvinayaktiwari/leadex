@@ -21,8 +21,10 @@ export interface LeadexStackProps extends StackProps {
   pipelineVersion: string
   llmModels: { smart: string; fast: string }
   sentryDsn?: string
-  // Lets anyone start a website analysis. Off by default until #7 adds rate limits, Turnstile and the domain cache.
+  // Lets anyone start a website analysis (3 per day per IP, Turnstile required). Off by default.
   publicAnalysesEnabled?: boolean
+  // Cloudflare Turnstile siteverify URL; required when publicAnalysesEnabled. TURNSTILE_SECRET comes from the app secret.
+  turnstileVerifyUrl?: string
   // Turns on the daily Leadex Data import schedule. Off by default; sources land in #22/#23.
   ingestEnabled?: boolean
   // Common Crawl domain-ranks file of the release to import, and how many domains to keep from it.
@@ -85,8 +87,8 @@ export class LeadexStack extends Stack {
     const tables = this.createTables(props.stage, removalPolicy)
     const queue = this.createQueues(key)
     const environment = this.sharedEnvironment(props, tables, queue, key)
-    const { api, stream } = this.createFunctions(environment, tables, queue, key)
     const shared = this.createWorkerShared(props.stage)
+    const { api, stream } = this.createFunctions(environment, this.analysesEnvironment(props), tables, queue, key, shared.appSecret)
     this.createWorker({ ...environment, LLM_MODEL_SMART: props.llmModels.smart, LLM_MODEL_FAST: props.llmModels.fast }, tables, queue, key, shared)
     this.createIngestTask(props, shared)
     new CfnOutput(this, 'ApiUrl', { value: api.url })
@@ -145,6 +147,13 @@ export class LeadexStack extends Stack {
     return environment
   }
 
+  // Only the API Lambda starts analyses; it reads TURNSTILE_SECRET from the app secret at cold start.
+  private analysesEnvironment(props: LeadexStackProps): Record<string, string> {
+    if (!props.publicAnalysesEnabled) return {}
+    if (!props.turnstileVerifyUrl) throw new Error('turnstileVerifyUrl is required when publicAnalysesEnabled is true')
+    return { APP_SECRET_ID: `leadex/${props.stage}/app`, TURNSTILE_VERIFY_URL: props.turnstileVerifyUrl }
+  }
+
   private grantData(
     grantee: iam.IGrantable,
     tables: Map<string, dynamodb.Table>,
@@ -171,11 +180,14 @@ export class LeadexStack extends Stack {
 
   private createFunctions(
     environment: Record<string, string>,
+    analysesEnvironment: Record<string, string>,
     tables: Map<string, dynamodb.Table>,
     queue: sqs.Queue,
     key: kms.Key,
+    appSecret: secretsmanager.ISecret,
   ): { api: lambda.FunctionUrl; stream: lambda.FunctionUrl } {
-    const apiFn = this.nodeFunction('ApiFunction', 'index.ts', 'handler', Duration.seconds(30), environment)
+    const apiFn = this.nodeFunction('ApiFunction', 'index.ts', 'handler', Duration.seconds(30), { ...environment, ...analysesEnvironment })
+    if (analysesEnvironment.APP_SECRET_ID) appSecret.grantRead(apiFn)
     const streamFn = this.nodeFunction('StreamFunction', 'stream.ts', 'streamingHandler', Duration.minutes(15), environment)
     for (const fn of [apiFn, streamFn]) this.grantData(fn, tables, key)
     queue.grantSendMessages(apiFn)

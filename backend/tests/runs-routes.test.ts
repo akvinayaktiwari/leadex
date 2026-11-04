@@ -3,7 +3,7 @@ import { resetEnvCacheForTests } from '../src/lib/env.js'
 import { createApp } from '../src/routes/index.js'
 import { RUN_STREAM_DEFAULTS, createRunStreamService } from '../src/services/run-stream-service.js'
 import type { ApiErrorBody, ApiServices, RunEvent } from '../src/types/index.js'
-import { DISABLED_ANALYSES } from './support/stub-services.js'
+import { DISABLED_ANALYSES, NO_CLIENT_IP } from './support/stub-services.js'
 import { manualClock, memoryEvents, memoryRuns, sampleRun } from './support/in-memory-run-store.js'
 
 const TS = '2026-10-21T10:00:00.000Z'
@@ -40,7 +40,7 @@ describe('GET /api/runs/:runId/events', () => {
   // fails_when=wrong content type, missing frames, or the response never completes;
   // no_claim=does not run inside the Lambda RESPONSE_STREAM runtime.
   it('streams all events as SSE', async () => {
-    const response = await createApp(await services()).request('/api/runs/run_1/events')
+    const response = await createApp(await services(), NO_CLIENT_IP).request('/api/runs/run_1/events')
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain('text/event-stream')
     const body = await response.text()
@@ -52,7 +52,7 @@ describe('GET /api/runs/:runId/events', () => {
   // fails_when=the header is ignored and the client gets duplicates, or ?after= is ignored on manual reconnects;
   // no_claim=does not test browser EventSource reconnection timing.
   it('resumes from Last-Event-ID or ?after=', async () => {
-    const app = createApp(await services())
+    const app = createApp(await services(), NO_CLIENT_IP)
     const byHeader = await app.request('/api/runs/run_1/events', { headers: { 'Last-Event-ID': '1' } })
     expect(eventIds(await byHeader.text())).toEqual(['2', '3'])
     const byQuery = await app.request('/api/runs/run_1/events?after=2')
@@ -63,7 +63,7 @@ describe('GET /api/runs/:runId/events', () => {
   // fails_when=a stream opens for a run the requester may not see, or the error is not JSON;
   // no_claim=does not test authenticated owners (no auth until #8).
   it('returns 404 for unknown or private runs', async () => {
-    const app = createApp(await services())
+    const app = createApp(await services(), NO_CLIENT_IP)
     for (const path of ['/api/runs/nope/events', '/api/runs/run_lb/events']) {
       const response = await app.request(path)
       expect(response.status).toBe(404)

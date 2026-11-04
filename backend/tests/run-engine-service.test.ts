@@ -164,4 +164,53 @@ describe('run engine', () => {
     await expect(engine.createRun({ type: 'analysis', domain: 'example.com' })).rejects.toThrow(/SQS unavailable/)
     expect(await runs.get('run_new')).toMatchObject({ status: 'failed', error: { code: 'enqueue_failed' } })
   })
+
+  // protects=the after-run hook (cache save) runs once for a successful run, never for a failed one, and its failure does not
+  // fail a run that already finished;
+  // fails_when=failed analyses are cached, or a cache write error turns a done run into a retried job;
+  // no_claim=n/a.
+  it('calls the after-run hook only for successful runs', async () => {
+    const done: string[] = []
+    const ok = setup({ analysis: () => [step('crawl', 'Reading')] })
+    ok.deps.onRunDone = async (run) => { done.push(run.runId) }
+    await ok.runs.create(sampleRun())
+    await createRunEngineService(ok.deps).executeRun({ runId: 'run_1', type: 'analysis' })
+    expect(done).toEqual(['run_1'])
+
+    const failing = setup({ analysis: () => [step('crawl', 'Reading', async () => { throw new Error('boom') })] })
+    failing.deps.onRunDone = async (run) => { done.push(run.runId) }
+    await failing.runs.create(sampleRun({ runId: 'run_2' }))
+    await createRunEngineService(failing.deps).executeRun({ runId: 'run_2', type: 'analysis' })
+    expect(done).toEqual(['run_1'])
+
+    const broken = setup({ analysis: () => [step('crawl', 'Reading')] })
+    broken.deps.onRunDone = async () => { throw new Error('cache down') }
+    await broken.runs.create(sampleRun({ runId: 'run_3' }))
+    await createRunEngineService(broken.deps).executeRun({ runId: 'run_3', type: 'analysis' })
+    expect(await broken.runs.get('run_3')).toMatchObject({ status: 'done' })
+  })
+
+  // protects=a replayed run gets the saved events with new seq 1..n and timestamps, then end:done, without a queue job; a write
+  // failure mid-replay marks the run failed;
+  // fails_when=a replay enqueues work, keeps the old seq/ts, lacks the end event, or leaves a half-written run "running";
+  // no_claim=n/a.
+  it('replays saved events into a finished run', async () => {
+    const { engine, runs, events, queue } = setup({})
+    const saved: RunEvent[] = [
+      { seq: 7, ts: '2026-01-01T00:00:00.000Z', kind: 'step', step: 'crawl', state: 'started', label: 'Reading' },
+      { seq: 9, ts: '2026-01-01T00:00:01.000Z', kind: 'agent_note', text: 'Read 4 pages' },
+    ]
+    const run = await engine.createReplayedRun({ type: 'analysis', domain: 'example.com' }, saved)
+    expect(run.status).toBe('done')
+    expect(events.all('run_new').map((event) => [event.seq, event.ts, event.kind])).toEqual([
+      [1, '2026-10-21T10:00:00.000Z', 'step'], [2, '2026-10-21T10:00:00.000Z', 'agent_note'], [3, '2026-10-21T10:00:00.000Z', 'end'],
+    ])
+    expect(await runs.get('run_new')).toMatchObject({ status: 'done' })
+    expect(queue.sent).toEqual([])
+
+    const failing = setup({})
+    failing.events.failNextAppend = true
+    await expect(failing.engine.createReplayedRun({ type: 'analysis', domain: 'example.com' }, saved)).rejects.toThrow()
+    expect(await failing.runs.get('run_new')).toMatchObject({ status: 'failed', error: { code: 'replay_failed' } })
+  })
 })

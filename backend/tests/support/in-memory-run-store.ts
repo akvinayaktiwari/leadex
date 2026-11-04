@@ -1,5 +1,9 @@
 import type {
+  AnalysisCacheRepository,
+  CachedAnalysis,
   Clock,
+  RateLimitRepository,
+  TurnstileRepository,
   RunErrorInfo,
   RunEvent,
   RunEventsRepository,
@@ -113,4 +117,55 @@ export function sampleRun(overrides: Partial<RunRecord> = {}): RunRecord {
     updatedAt: '2026-10-21T10:00:00.000Z',
     ...overrides,
   }
+}
+
+export interface MemoryAnalysisCache extends AnalysisCacheRepository {
+  items: Map<string, CachedAnalysis>
+}
+
+export function memoryAnalysisCache(): MemoryAnalysisCache {
+  const items = new Map<string, CachedAnalysis>()
+  return {
+    items,
+    async get(domain: string, pipelineVersion: string): Promise<CachedAnalysis | undefined> {
+      return items.get(`${domain}#${pipelineVersion}`)
+    },
+    async put(entry: CachedAnalysis): Promise<void> {
+      items.set(`${entry.domain}#${entry.pipelineVersion}`, entry)
+    },
+  }
+}
+
+export interface MemoryRateLimits extends RateLimitRepository {
+  counts: Map<string, number>
+}
+
+// Same all-or-nothing rule as the DynamoDB transaction.
+export function memoryRateLimits(): MemoryRateLimits {
+  const counts = new Map<string, number>()
+  return {
+    counts,
+    async consume(keys: string[], limit: number): Promise<boolean> {
+      const unique = [...new Set(keys)]
+      if (unique.some((key) => (counts.get(key) ?? 0) >= limit)) return false
+      for (const key of unique) counts.set(key, (counts.get(key) ?? 0) + 1)
+      return true
+    },
+  }
+}
+
+export interface FakeTurnstile extends TurnstileRepository {
+  checked: string[]
+}
+
+// Accepts only the token 'ok'.
+export function fakeTurnstile(): FakeTurnstile {
+  const turnstile: FakeTurnstile = {
+    checked: [],
+    async verify(token: string): Promise<boolean> {
+      turnstile.checked.push(token)
+      return token === 'ok'
+    },
+  }
+  return turnstile
 }

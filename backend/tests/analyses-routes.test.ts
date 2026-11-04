@@ -1,24 +1,31 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { getApiEnv, resetEnvCacheForTests } from '../src/lib/env.js'
 import { createApp } from '../src/routes/index.js'
-import { createAnalysisService } from '../src/services/analysis-service.js'
+import { NO_CLIENT_IP } from './support/stub-services.js'
+import { DISABLED_ANALYSIS_SERVICE, createAnalysisService } from '../src/services/analysis-service.js'
 import { createRunEngineService } from '../src/services/run-engine-service.js'
 import type { ApiServices } from '../src/types/index.js'
-import { manualClock, memoryEvents, memoryQueue, memoryRuns } from './support/in-memory-run-store.js'
+import { fakeTurnstile, manualClock, memoryAnalysisCache, memoryEvents, memoryQueue, memoryRateLimits, memoryRuns } from './support/in-memory-run-store.js'
 
 function setup(enabled: boolean) {
   const runs = memoryRuns()
   const queue = memoryQueue()
-  const runEngine = createRunEngineService({ runs, events: memoryEvents(), queue, pipelines: {}, clock: manualClock(), newId: () => 'run_new' })
+  const clock = manualClock()
+  const rateLimits = memoryRateLimits()
+  const turnstile = fakeTurnstile()
+  const runEngine = createRunEngineService({ runs, events: memoryEvents(), queue, pipelines: {}, clock, newId: () => (runs.items.size === 0 ? 'run_new' : `run_${runs.items.size + 1}`) })
   const services: ApiServices = {
     runStream: { authorize: () => Promise.reject(new Error('not used')), stream: () => Promise.reject(new Error('not used')) },
-    analyses: createAnalysisService({ runEngine, enabled }),
+    analyses: enabled
+      ? createAnalysisService({ runEngine, cache: memoryAnalysisCache(), rateLimits, turnstile, clock, pipelineVersion: '1', dailyLimit: 3 })
+      : DISABLED_ANALYSIS_SERVICE,
   }
-  return { app: createApp(services), runs, queue }
+  return { app: createApp(services, NO_CLIENT_IP), runs, queue, services, clock, rateLimits, turnstile }
 }
 
-const post = (app: ReturnType<typeof createApp>, body: unknown) =>
-  app.request('/api/analyses', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' }, body: JSON.stringify(body) })
+// Sends a valid Turnstile token unless the body sets its own.
+const post = (app: ReturnType<typeof createApp>, body: Record<string, unknown>) =>
+  app.request('/api/analyses', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' }, body: JSON.stringify({ turnstileToken: 'ok', ...body }) })
 
 describe('POST /api/analyses', () => {
   beforeEach(() => {
@@ -37,7 +44,7 @@ describe('POST /api/analyses', () => {
     const { app, runs, queue } = setup(true)
     const response = await post(app, { url: 'https://WWW.Acme.com/pricing?x=1' })
     expect(response.status).toBe(202)
-    expect(await response.json()).toEqual({ runId: 'run_new', domain: 'acme.com' })
+    expect(await response.json()).toEqual({ runId: 'run_new', domain: 'acme.com', cached: false })
     expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:3000')
     expect((await runs.get('run_new'))?.type).toBe('analysis')
     expect(queue.sent).toEqual([{ runId: 'run_new', type: 'analysis' }])
@@ -73,5 +80,44 @@ describe('POST /api/analyses', () => {
     resetEnvCacheForTests()
     expect(getApiEnv({ ...base, PUBLIC_ANALYSES_ENABLED: 'true' }).PUBLIC_ANALYSES_ENABLED).toBe(true)
     resetEnvCacheForTests()
+  })
+
+  // protects=acceptance criterion 4: a 4th anonymous analysis from one IP in one UTC day gets 429 rate_limited and starts nothing;
+  // a different device on that IP is still refused, the same device on another IP is refused too, and the next UTC day is open;
+  // fails_when=the limit is per device only (clearing storage resets it), refused requests still queue work, or limits never reset;
+  // no_claim=in-memory counters; the DynamoDB transaction is tested in rate-limits.test.ts.
+  it('limits anonymous analyses per IP and per device per day', async () => {
+    const { services, queue, clock } = setup(true)
+    let ip = '203.0.113.7'
+    const app = createApp(services, () => ip)
+    for (const deviceId of ['device-aaaa', 'device-aaaa', 'device-bbbb']) expect((await post(app, { url: 'acme.com', deviceId })).status).toBe(202)
+    const refused = await post(app, { url: 'acme.com', deviceId: 'device-cccc' })
+    expect(refused.status).toBe(429)
+    expect(await refused.json()).toMatchObject({ error: { code: 'rate_limited' } })
+    expect(queue.sent).toHaveLength(3)
+    ip = '198.51.100.9'
+    expect((await post(app, { url: 'acme.com', deviceId: 'device-cccc' })).status).toBe(202)
+    expect((await post(app, { url: 'acme.com', deviceId: 'device-cccc' })).status).toBe(202)
+    expect((await post(app, { url: 'acme.com', deviceId: 'device-aaaa' })).status).toBe(202)
+    expect((await post(app, { url: 'acme.com', deviceId: 'device-aaaa' })).status).toBe(429)
+    clock.advance(24 * 60 * 60 * 1000)
+    ip = '203.0.113.7'
+    expect((await post(app, { url: 'acme.com', deviceId: 'device-aaaa' })).status).toBe(202)
+  })
+
+  // protects=acceptance criterion 4: a missing or invalid Turnstile token gets 400 turnstile_failed, starts nothing and does not
+  // use up the caller's daily quota;
+  // fails_when=a request without a token runs (bots get free analyses), or failed attempts lock a person out for the day;
+  // no_claim=fake Turnstile; the siteverify call is tested in turnstile-repository.test.ts.
+  it('requires a valid Turnstile token', async () => {
+    const { app, queue, rateLimits, turnstile } = setup(true)
+    for (const turnstileToken of [undefined, 'forged']) {
+      const response = await post(app, { url: 'acme.com', turnstileToken })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ error: { code: 'turnstile_failed' } })
+    }
+    expect(turnstile.checked).toEqual(['forged'])
+    expect(queue.sent).toEqual([])
+    expect(rateLimits.counts.size).toBe(0)
   })
 })

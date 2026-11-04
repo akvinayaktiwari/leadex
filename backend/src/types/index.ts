@@ -1,3 +1,4 @@
+import type { Context } from 'hono'
 import type { ZodType } from 'zod'
 
 export type Stage = 'dev' | 'staging' | 'prod'
@@ -16,6 +17,7 @@ export interface RunStoreEnv {
   AWS_REGION: string
   TABLE_RUNS: string
   TABLE_RUN_EVENTS: string
+  TABLE_ANALYSES: string
   SQS_RUNS_QUEUE_URL: string
   DYNAMODB_ENDPOINT?: string | undefined
 }
@@ -171,7 +173,30 @@ export interface CreateRunInput {
 
 export interface RunEngineService {
   createRun(input: CreateRunInput): Promise<RunRecord>
+  // A finished run filled from saved events (a cache hit): no queue, no pipeline.
+  createReplayedRun(input: CreateRunInput, events: RunEventBody[]): Promise<RunRecord>
   executeRun(job: RunJobMessage): Promise<void>
+}
+
+// A completed analysis kept for 30 days per (domain, pipelineVersion), replayed instead of running the pipeline again.
+export interface CachedAnalysis {
+  domain: string
+  pipelineVersion: string
+  sourceRunId: string
+  // The source run's events, without its end event.
+  events: RunEvent[]
+  createdAt: string
+  expiresAt: string
+}
+
+export interface AnalysisCacheRepository {
+  get(domain: string, pipelineVersion: string): Promise<CachedAnalysis | undefined>
+  put(entry: CachedAnalysis): Promise<void>
+}
+
+export interface AnalysisCacheService {
+  // Saves a finished analysis run's events; other run types and failed runs are ignored.
+  saveFromRun(run: RunRecord): Promise<void>
 }
 
 export interface RunEventSink {
@@ -196,13 +221,50 @@ export interface RunStreamOptions {
   pageSize: number
 }
 
+export interface StartAnalysisRequest {
+  url: string
+  // The caller's address as the API sees it; 'unknown' if the runtime gives none.
+  ip: string
+  // A random id the browser keeps; a second, weaker limit than the IP.
+  deviceId?: string | undefined
+  // Cloudflare Turnstile token from the form; required.
+  turnstileToken?: string | undefined
+}
+
 export type StartAnalysisResult =
-  | { ok: true; runId: string; domain: string }
-  | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analyses_disabled' }
+  | { ok: true; runId: string; domain: string; cached: boolean }
+  | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analyses_disabled' | 'turnstile_failed' | 'rate_limited' }
 
 export interface AnalysisService {
-  start(url: string): Promise<StartAnalysisResult>
+  start(request: StartAnalysisRequest): Promise<StartAnalysisResult>
 }
+
+export interface RateLimitRepository {
+  // Counts one use on every key if all are under the limit; returns false and counts nothing if any key is at it.
+  consume(keys: string[], limit: number, expiresAt: string): Promise<boolean>
+}
+
+export interface TurnstileRepository {
+  // True only when Cloudflare confirms the token. Throws if Cloudflare cannot be reached.
+  verify(token: string, ip: string): Promise<boolean>
+}
+
+export interface SecretsRepository {
+  // One field of a JSON secret (the stage's app secret).
+  readField(secretId: string, field: string): Promise<string>
+}
+
+// Read only when PUBLIC_ANALYSES_ENABLED is true.
+export interface AnalysesEnv {
+  TABLE_RATE_LIMITS: string
+  ANONYMOUS_ANALYSES_PER_DAY: number
+  TURNSTILE_VERIFY_URL: string
+  // Local development sets the secret directly; in AWS it is read from the app secret named APP_SECRET_ID.
+  TURNSTILE_SECRET?: string | undefined
+  APP_SECRET_ID?: string | undefined
+}
+
+export type ClientIpReader = (c: Context) => string | undefined
 
 export interface ApiServices {
   runStream: RunStreamService

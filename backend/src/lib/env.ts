@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ApiEnv, IngestEnv, LeadDataEnv, RunStoreEnv, WorkerEnv } from '../types/index.js'
+import type { AnalysesEnv, ApiEnv, IngestEnv, LeadDataEnv, RunStoreEnv, WorkerEnv } from '../types/index.js'
 
 const apiEnvSchema = z.object({
   STAGE: z.enum(['dev', 'staging', 'prod']),
@@ -14,10 +14,19 @@ const runStoreEnvSchema = z.object({
   AWS_REGION: z.string().min(1),
   TABLE_RUNS: z.string().min(1),
   TABLE_RUN_EVENTS: z.string().min(1),
+  TABLE_ANALYSES: z.string().min(1),
   SQS_RUNS_QUEUE_URL: z.url(),
   // Local development and tests only (DynamoDB Local). Unset in AWS.
   DYNAMODB_ENDPOINT: z.url().optional(),
 }) satisfies z.ZodType<RunStoreEnv>
+
+const analysesEnvSchema = z.object({
+  TABLE_RATE_LIMITS: z.string().min(1),
+  ANONYMOUS_ANALYSES_PER_DAY: z.coerce.number().int().min(1).max(1_000).default(3),
+  TURNSTILE_VERIFY_URL: z.url(),
+  TURNSTILE_SECRET: z.string().min(1).optional(),
+  APP_SECRET_ID: z.string().min(1).optional(),
+}).refine((env) => env.TURNSTILE_SECRET || env.APP_SECRET_ID, { path: ['TURNSTILE_SECRET'], message: 'set TURNSTILE_SECRET or APP_SECRET_ID' }) satisfies z.ZodType<AnalysesEnv, Record<string, unknown>>
 
 const workerEnvSchema = apiEnvSchema.extend(runStoreEnvSchema.shape).extend({
   ANTHROPIC_API_KEY: z.string().min(1),
@@ -90,6 +99,10 @@ function parseEnv<T>(schema: z.ZodType<T>, source: NodeJS.ProcessEnv): T {
 export function getApiEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
   cachedApiEnv ??= parseEnv(apiEnvSchema, source)
   return cachedApiEnv
+}
+
+export function getAnalysesEnv(source: NodeJS.ProcessEnv = process.env): AnalysesEnv {
+  return parseEnv(analysesEnvSchema, source)
 }
 
 export function getRunStoreEnv(source: NodeJS.ProcessEnv = process.env): RunStoreEnv {

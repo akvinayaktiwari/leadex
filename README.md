@@ -55,6 +55,8 @@ aws secretsmanager create-secret --name leadex/dev/app --secret-string \
 
 If the secret already exists, add the three `CLICKHOUSE_*` keys with `aws secretsmanager put-secret-value` (it replaces the whole JSON, so include `ANTHROPIC_API_KEY` too).
 
+Public website analyses are off until you deploy with `PUBLIC_ANALYSES_ENABLED=true`. They need Cloudflare Turnstile: add `TURNSTILE_SECRET` to the same app secret, and deploy with `TURNSTILE_VERIFY_URL=https://challenges.cloudflare.com/turnstile/v0/siteverify`. The frontend needs the matching site key as `NEXT_PUBLIC_TURNSTILE_SITE_KEY`. Each IP and each device get `ANONYMOUS_ANALYSES_PER_DAY` analyses (default 3) per UTC day, and a domain analysed in the last 30 days is replayed from the cache.
+
 ### Leadex Data (ClickHouse)
 
 Leadex's own lead database runs on ClickHouse Cloud, created by hand (not in CDK). The database name is `leadex_<stage>`. Apply the schema in `infra/clickhouse/` before the first deploy and after adding a migration:
