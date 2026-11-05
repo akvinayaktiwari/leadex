@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { resumableDownload } from '../src/repositories/http-download.js'
 
 const FILE = Buffer.from(Array.from({ length: 200_000 }, (_, i) => String.fromCharCode(97 + (i % 26))).join(''))
-const OPTIONS = { userAgent: 'test', idleTimeoutMs: 150, maxRetries: 3 }
+const OPTIONS = { userAgent: 'test', idleTimeoutMs: 150, maxRetries: 3, retryBaseMs: 50, retryMaxMs: 200 }
 
 type Route = (request: IncomingMessage, response: ServerResponse, requestNumber: number) => void
 
@@ -110,5 +110,23 @@ describe('resumable download (local HTTP server)', () => {
     }
     expect((await download('/silent-first')).equals(FILE)).toBe(true)
     expect(counts['/silent-first']).toBe(2)
+  })
+
+  // protects=resumes wait with growing delays, so a short outage where every connection fails at once (seen at the end of
+  // the 9.5 h GLEIF import on 2026-11-03: four `fetch failed` within 10 ms) does not use up the retries;
+  // fails_when=retries fire back to back and the download fails while the server is briefly unreachable;
+  // no_claim=does not cover outages longer than the total backoff (50+100+200 ms here, about 3 minutes in production).
+  it('waits between retries so a short outage is survived', async () => {
+    const outageMs = 400
+    let outageEndsAt = 0
+    routes['/outage'] = (request, response, n) => {
+      if (n === 1) {
+        outageEndsAt = Date.now() + outageMs
+        return serve(response, 0, 10_000)
+      }
+      if (Date.now() < outageEndsAt) return response.socket?.destroy()
+      serve(response, rangeStart(request))
+    }
+    expect((await download('/outage')).equals(FILE)).toBe(true)
   })
 })

@@ -1,5 +1,8 @@
 // Streams a large public file, surviving network stalls: if no bytes arrive for idleTimeoutMs while we are
 // waiting for the network, the request is aborted and resumed with an HTTP Range request from the byte reached.
+import { createWriteStream } from 'node:fs'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { logInfo } from '../lib/logger.js'
 
 export interface DownloadOptions {
@@ -8,8 +11,15 @@ export interface DownloadOptions {
   idleTimeoutMs: number
   // Interruptions in a row with no new bytes before giving up.
   maxRetries: number
+  // Wait before each resume: retryBaseMs, doubling per interruption in a row, capped at retryMaxMs. Without it a short
+  // outage (Wi-Fi, laptop sleep) used up every retry within milliseconds.
+  retryBaseMs: number
+  retryMaxMs: number
   signal?: AbortSignal | undefined
 }
+
+// Production retry policy: 8 interruptions in a row, waiting 1, 2, 4 … up to 60 s between them (about 3 minutes in all).
+export const RETRY_POLICY: Pick<DownloadOptions, 'maxRetries' | 'retryBaseMs' | 'retryMaxMs'> = { maxRetries: 8, retryBaseMs: 1_000, retryMaxMs: 60_000 }
 
 class StallError extends Error {
   constructor(url: string, idleTimeoutMs: number) {
@@ -65,6 +75,25 @@ async function* streamFrom(url: string, offset: number, options: DownloadOptions
   }
 }
 
+// Resolves after ms, or rejects at once if the download is cancelled meanwhile.
+function waitBeforeRetry(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+const retryDelayMs = (options: DownloadOptions, failuresInARow: number): number =>
+  Math.min(options.retryMaxMs, options.retryBaseMs * 2 ** (failuresInARow - 1))
+
 const isRetryable = (error: unknown): boolean => error instanceof StallError || (error instanceof TypeError && /fetch failed|terminated|socket/i.test(String(error.message) + String((error as { cause?: unknown }).cause ?? '')))
 
 // maxRetries counts interruptions in a row without new data: a long download on a flaky link that keeps making
@@ -84,7 +113,24 @@ export async function* resumableDownload(url: string, options: DownloadOptions):
       failures += 1
       offsetAtLastFailure = offset
       if (options.signal?.aborted || failures > options.maxRetries || !isRetryable(error)) throw error
-      logInfo('download interrupted, resuming', { url, offset, failuresInARow: failures, reason: error instanceof Error ? error.message : String(error) })
+      const delayMs = retryDelayMs(options, failures)
+      logInfo('download interrupted, resuming', { url, offset, failuresInARow: failures, delayMs, reason: error instanceof Error ? error.message : String(error) })
+      await waitBeforeRetry(delayMs, options.signal)
     }
   }
+}
+
+// Saves the whole file before anything reads it, so a slow consumer never holds the connection open for hours (the GLEIF
+// import kept one open ~9.5 h and was cut every ~15 minutes).
+export async function downloadToFile(url: string, path: string, options: DownloadOptions): Promise<{ bytes: number; durationMs: number }> {
+  const startedAt = Date.now()
+  let bytes = 0
+  const counted = async function* (): AsyncGenerator<Uint8Array> {
+    for await (const chunk of resumableDownload(url, options)) {
+      bytes += chunk.length
+      yield chunk
+    }
+  }
+  await pipeline(Readable.from(counted()), createWriteStream(path))
+  return { bytes, durationMs: Date.now() - startedAt }
 }
