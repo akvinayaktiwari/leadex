@@ -21,7 +21,7 @@ export function AnalysisView({ runId, domain, createSource }: { runId: string; d
   })
   return (
     <main className="analysis">
-      <p className="eyebrow">Leadex · {domain}</p>
+      <p className="eyebrow"><a href="/">Leadex</a> · {domain}</p>
       <h1>Who buys from {domain}</h1>
       <StepTimeline run={run} connection={connection} />
       {run.profile ? <ProfileCard profile={run.profile} corrections={corrections} onCorrect={correct} /> : null}
