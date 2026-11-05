@@ -8,6 +8,9 @@ import { EMPTY_RUN, applyEvent, parseRunEvent } from './run-state'
 
 const EVENT_KINDS = ['step', 'artifact', 'agent_note', 'end'] as const
 const MAX_BACKOFF_MS = 10_000
+// A stream that the server refuses this many times and that never opened is not a dropped connection: the run is
+// unknown, expired or not ours (the browser closes for good on a 404). Stop and say so instead of retrying forever.
+const MAX_REFUSALS_BEFORE_OPEN = 3
 
 export interface EventSourceLike {
   readyState: number
@@ -33,6 +36,7 @@ interface Connection {
   retryTimer?: ReturnType<typeof setTimeout>
   attempts: number
   stopped: boolean
+  everOpened: boolean
 }
 
 export interface RunStreamOptions {
@@ -48,7 +52,7 @@ export interface RunStreamOptions {
 // Opens the stream and keeps it alive until the run ends; returns a function that stops it.
 export function connectRunStream(options: RunStreamOptions): () => void {
   const schedule = options.schedule ?? setTimeout
-  const state: Connection = { attempts: 0, stopped: false }
+  const state: Connection = { attempts: 0, stopped: false, everOpened: false }
   const handle = (message: MessageEvent<string>): void => {
     const event = parseRunEvent(message.data)
     if (!event) return
@@ -64,14 +68,19 @@ export function connectRunStream(options: RunStreamOptions): () => void {
     for (const kind of EVENT_KINDS) source.addEventListener(kind, handle)
     source.onopen = () => {
       state.attempts = 0
+      state.everOpened = true
       options.onConnection('open')
     }
     source.onerror = () => {
       if (state.stopped) return
-      options.onConnection('reconnecting')
       // CONNECTING: the browser retries by itself. CLOSED: it gave up, so reconnect from the last applied event.
-      if (source.readyState !== CLOSED) return
+      if (source.readyState !== CLOSED) return options.onConnection('reconnecting')
       source.close()
+      if (!state.everOpened && state.attempts + 1 >= MAX_REFUSALS_BEFORE_OPEN) {
+        state.stopped = true
+        return options.onConnection('unavailable')
+      }
+      options.onConnection('reconnecting')
       state.retryTimer = schedule(open, Math.min(MAX_BACKOFF_MS, 1000 * 2 ** state.attempts))
       state.attempts += 1
     }

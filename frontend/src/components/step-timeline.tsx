@@ -18,6 +18,9 @@ export function StepTimeline({ run, connection }: { run: RunView; connection: Co
       </ol>
       {run.notes.length > 0 ? <ul className="notes">{run.notes.map((note, i) => <li key={i}>{note}</li>)}</ul> : null}
       {connection === 'reconnecting' && !run.end ? <p className="hint">Connection lost, reconnecting…</p> : null}
+      {connection === 'unavailable' ? (
+        <p className="status-bad">We couldn&apos;t load this analysis. The link may have expired. <a href="/">Start a new analysis</a></p>
+      ) : null}
       {run.end?.status === 'failed' ? <p className="status-bad">{run.end.error?.message ?? 'The analysis failed.'}</p> : null}
     </section>
   )

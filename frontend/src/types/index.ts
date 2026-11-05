@@ -20,7 +20,8 @@ export interface PublicConfig {
 
 export type StartAnalysisResult = { ok: true; runId: string; domain: string } | { ok: false; message: string }
 
-export type ConnectionState = 'connecting' | 'open' | 'reconnecting' | 'closed'
+// 'unavailable': the server kept refusing a stream that never opened (unknown or expired run).
+export type ConnectionState = 'connecting' | 'open' | 'reconnecting' | 'closed' | 'unavailable'
 
 // ---- Analysis runs (mirror of the backend's run events and artifacts) ----
 
