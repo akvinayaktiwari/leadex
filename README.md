@@ -46,6 +46,22 @@ npx cdk synth
 npx cdk deploy
 ```
 
+### Run it for real on this machine
+
+Everything except the AI model runs locally: DynamoDB Local, ClickHouse and an SQS-compatible queue in Docker, with the real API, worker and frontend.
+
+```bash
+docker compose up -d                                  # DynamoDB, ClickHouse, queue
+cp backend/.env.example backend/.env                  # local defaults; add ANTHROPIC_API_KEY
+cp frontend/.env.example frontend/.env.local
+npm run local:setup --workspace backend               # tables, queue, ClickHouse schema (safe to rerun)
+npm run dev --workspace backend                       # API on http://localhost:8787
+npm run dev:worker --workspace backend                # runs analyses (needs ANTHROPIC_API_KEY)
+npm run dev --workspace frontend                      # http://localhost:3000
+```
+
+The local `.env` turns public analyses on, with Cloudflare's Turnstile test keys (every check passes) and 3 analyses per IP per day. Without `ANTHROPIC_API_KEY` the worker stops at start and names the missing variable; the API still accepts and queues analyses.
+
 Before the first deploy of a stage, create its app secret once. The worker reads `ANTHROPIC_API_KEY` from it; the ingest task reads the ClickHouse connection:
 
 ```bash
