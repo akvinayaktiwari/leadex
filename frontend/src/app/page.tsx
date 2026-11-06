@@ -11,7 +11,8 @@ export default function HomePage() {
         first draft for each.
       </p>
       <WebsiteForm />
-      <ApiStatus />
+      {/* A health check for local development; visitors never need it. */}
+      {process.env.NODE_ENV === 'development' ? <ApiStatus /> : null}
     </main>
   )
 }
