@@ -28,7 +28,7 @@ export function TurnstileWidget() {
   return (
     <>
       <Script src={TURNSTILE_SCRIPT} strategy="afterInteractive" />
-      <div className="cf-turnstile" data-sitekey={turnstileSiteKey} />
+      <div className="cf-turnstile mt-4" data-sitekey={turnstileSiteKey} />
     </>
   )
 }
