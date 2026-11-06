@@ -64,7 +64,7 @@ describe('analysis view', () => {
   // no_claim=sending corrections to a lead build is #12.
   it('lets the user correct a claim', () => {
     renderWith(EVENTS)
-    fireEvent.click(screen.getAllByRole('button', { name: 'Correct this' })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: 'Correct "Invoicing for agencies"' }))
     fireEvent.change(screen.getByLabelText('What you sell'), { target: { value: 'Invoicing for design studios' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(screen.getByText('Invoicing for design studios')).toBeTruthy()

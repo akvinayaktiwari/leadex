@@ -1,0 +1,26 @@
+# Local Leadex stack: the same services the app uses in AWS, on this machine.
+#   docker compose up -d && npm run local:setup --workspace backend
+# Then run the API, the worker and the frontend (see README "Run it for real on this machine").
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:2.6.1
+    command: -jar DynamoDBLocal.jar -sharedDb -dbPath /data
+    volumes: [dynamodb-data:/data]
+    ports: ['8000:8000']
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8.33.6
+    environment:
+      CLICKHOUSE_USER: leadex
+      CLICKHOUSE_PASSWORD: leadex
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes: [clickhouse-data:/var/lib/clickhouse]
+    ports: ['8123:8123']
+  # SQS-compatible queue for the run worker (AWS uses SQS).
+  sqs:
+    image: softwaremill/elasticmq-native:1.7.1
+    ports: ['9324:9324']
+volumes:
+  dynamodb-data:
+  clickhouse-data:

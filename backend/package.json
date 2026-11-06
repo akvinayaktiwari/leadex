@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file=.env src/dev-server.ts",
+    "dev:worker": "tsx watch --env-file=.env worker.ts",
+    "local:setup": "tsx --env-file=.env tools/local-setup.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "npm run build:api && npm run build:stream && npm run build:worker && npm run build:ingest",

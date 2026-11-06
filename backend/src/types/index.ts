@@ -20,6 +20,7 @@ export interface RunStoreEnv {
   TABLE_ANALYSES: string
   SQS_RUNS_QUEUE_URL: string
   DYNAMODB_ENDPOINT?: string | undefined
+  SQS_ENDPOINT?: string | undefined
 }
 
 export interface WorkerEnv extends ApiEnv, RunStoreEnv {

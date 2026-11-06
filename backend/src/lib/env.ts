@@ -18,6 +18,7 @@ const runStoreEnvSchema = z.object({
   SQS_RUNS_QUEUE_URL: z.url(),
   // Local development and tests only (DynamoDB Local). Unset in AWS.
   DYNAMODB_ENDPOINT: z.url().optional(),
+  SQS_ENDPOINT: z.url().optional(),
 }) satisfies z.ZodType<RunStoreEnv>
 
 const analysesEnvSchema = z.object({
@@ -97,8 +98,13 @@ const ingestEnvSchema = leadDataEnvSchema.extend({
 
 let cachedApiEnv: ApiEnv | undefined
 
+// KEY= (as copied from .env.example) means "not set", so optional settings fall back to their defaults.
+function withoutEmptyValues(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(source).filter(([, value]) => value !== ''))
+}
+
 function parseEnv<T>(schema: z.ZodType<T>, source: NodeJS.ProcessEnv): T {
-  const result = schema.safeParse(source)
+  const result = schema.safeParse(withoutEmptyValues(source))
   if (!result.success) {
     const fields = result.error.issues.map((issue) => issue.path.join('.')).join(', ')
     throw new Error(`Invalid or missing environment variables: ${fields}`)
