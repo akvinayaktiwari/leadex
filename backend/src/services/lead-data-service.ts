@@ -192,18 +192,26 @@ function createEnrichMethods(deps: LeadDataServiceDeps): Pick<LeadDataService, '
   }
 }
 
+// Addresses that may be stored: suppressed neither by address nor by domain.
+async function allowedEmails(repository: LeadDataRepository, emails: string[]): Promise<Set<string>> {
+  const byEmail = new Map(emails.map((email) => [email, suppressionHash('email', email)] as const))
+  const byDomain = new Map(emails.map((email) => [email, suppressionHash('domain', email.split('@')[1] ?? '')] as const))
+  const blockedEmails = await repository.findSuppressed('email', [...new Set(byEmail.values())])
+  const blockedDomains = await repository.findSuppressed('domain', [...new Set(byDomain.values())])
+  return new Set(emails.filter((email) => !blockedEmails.has(byEmail.get(email) ?? '') && !blockedDomains.has(byDomain.get(email) ?? '')))
+}
+
 export function createLeadDataService(deps: LeadDataServiceDeps): LeadDataService {
   return {
     ...createWriteMethods(deps),
     ...createEnrichMethods(deps),
     ...createSearchMethods(deps),
     ...createDeliveryMethods(deps),
-    async allowedEmails(emails: string[]): Promise<Set<string>> {
-      const byEmail = new Map(emails.map((email) => [email, suppressionHash('email', email)] as const))
-      const byDomain = new Map(emails.map((email) => [email, suppressionHash('domain', email.split('@')[1] ?? '')] as const))
-      const blockedEmails = await deps.repository.findSuppressed('email', [...new Set(byEmail.values())])
-      const blockedDomains = await deps.repository.findSuppressed('domain', [...new Set(byDomain.values())])
-      return new Set(emails.filter((email) => !blockedEmails.has(byEmail.get(email) ?? '') && !blockedDomains.has(byDomain.get(email) ?? '')))
+    allowedEmails: (emails) => allowedEmails(deps.repository, emails),
+    async verifiedEmails(personKeys: string[]): Promise<Map<string, string>> {
+      const rows = await deps.repository.validEmails([...new Set(personKeys)])
+      const allowed = await allowedEmails(deps.repository, rows.map((row) => row.email))
+      return new Map(rows.filter((row) => allowed.has(row.email)).map((row) => [row.personKey, row.email]))
     },
     async suppress(kind: SuppressionKind, value: string, reason: SuppressionReason): Promise<void> {
       const createdAt = deps.clock.now().toISOString()

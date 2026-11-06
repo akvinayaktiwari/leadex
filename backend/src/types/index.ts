@@ -26,6 +26,11 @@ export interface WorkerEnv extends ApiEnv, RunStoreEnv {
   ANTHROPIC_API_KEY: string
   LLM_MODEL_SMART: string
   LLM_MODEL_FAST: string
+  // Leadex Data, for lead builds. All four or none; without them the worker runs analyses only.
+  CLICKHOUSE_URL?: string | undefined
+  CLICKHOUSE_USER?: string | undefined
+  CLICKHOUSE_PASSWORD?: string | undefined
+  CLICKHOUSE_DATABASE?: string | undefined
 }
 
 export interface HealthStatus {
@@ -95,6 +100,8 @@ export interface RunRecord {
   createdAt: string
   updatedAt: string
   error?: RunErrorInfo | undefined
+  // lead_build runs only: what to build, fixed when the run is created.
+  leadBuild?: LeadBuildInput | undefined
 }
 
 export interface StepEventBody {
@@ -169,6 +176,57 @@ export interface CreateRunInput {
   type: RunType
   domain: string
   userId?: string | undefined
+  leadBuild?: LeadBuildInput | undefined
+}
+
+// ---- Lead builds (#12) ----
+
+// Taken from the user's cached analysis when the build starts, so the client never supplies search filters.
+export interface LeadBuildInput {
+  profile: ProductProfile
+  segments: IcpSegment[]
+  leadCount: number
+}
+
+// A person at a matching company with a stored, verified email, before qualification.
+export interface LeadCandidate {
+  segmentId: string
+  company: CompanyRecord
+  person: PersonRecord
+  email: string
+}
+
+export interface QualifiedLead {
+  leadId: string
+  segmentId: string
+  company: { domain: string; name: string; industry?: string | undefined; country: string; city?: string | undefined; employeeBand?: EmployeeBand | undefined }
+  person: { firstName: string; lastName: string; title: string; email: string }
+  emailStatus: 'valid'
+  // 60-100: how well the company fits the segment for this seller.
+  fitScore: number
+  // One sentence on why this seller's offer fits this company; the first email (#13) is built on it.
+  angle: string
+}
+
+export interface LeadBuildState {
+  candidates?: LeadCandidate[] | undefined
+  leads?: QualifiedLead[] | undefined
+}
+
+export type StartLeadBuildResult =
+  | { ok: true; runId: string }
+  | { ok: false; code: 'invalid_url' | 'unsupported_host' | 'analysis_not_found' | 'unknown_segments' | 'invalid_lead_count' }
+
+export interface StartLeadBuildRequest {
+  userId: string
+  // The user's own website, analysed earlier.
+  url: string
+  segmentIds: string[]
+  leadCount: number
+}
+
+export interface LeadBuildService {
+  start(request: StartLeadBuildRequest): Promise<StartLeadBuildResult>
 }
 
 export interface RunEngineService {
@@ -613,6 +671,8 @@ export interface LeadDataRepository {
   searchPeople(query: PeopleSearchQuery): Promise<PersonRecord[]>
   listFacts(entityType: EntityType, entityIds: string[]): Promise<Fact[]>
   findCompaniesByDomain(domains: string[]): Promise<CompanyRecord[]>
+  // Latest check per person where it is 'valid'.
+  validEmails(personKeys: string[]): Promise<{ personKey: string; email: string }[]>
   // Companies with a legal name but no LEI yet, most recently updated first (for GLEIF matching).
   companiesWithoutLei(limit: number): Promise<CompanyRecord[]>
   insertSuppression(entries: SuppressionEntry[]): Promise<void>
@@ -649,6 +709,8 @@ export interface LeadDataService {
   companiesWithoutLei(limit: number): Promise<CompanyRecord[]>
   findCompanies(filters: CompanyFilters, limit: number): Promise<CompanyRecord[]>
   findPeople(domains: string[], titleTerms: string[], limit: number): Promise<PersonRecord[]>
+  // Each person's latest verified ('valid') address, without suppressed addresses or domains.
+  verifiedEmails(personKeys: string[]): Promise<Map<string, string>>
   // For delivery: every populated field must be backed by a fact, or this throws LeadDataRuleError (missing_provenance).
   loadDeliverableCompanies(companies: CompanyRecord[]): Promise<DeliverableCompany[]>
   loadDeliverablePeople(people: PersonRecord[]): Promise<DeliverablePerson[]>
