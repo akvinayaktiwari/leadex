@@ -1065,3 +1065,45 @@ export interface EmailBatchSummary {
   // Set when the batch ended early, e.g. out of verifier credits.
   stoppedReason?: string | undefined
 }
+
+// ---- Credits (#8) ----
+
+export interface CreditAccount {
+  userId: string
+  email: string
+  creditBalance: number
+  createdAt: string
+}
+
+export type CreditEntryKind = 'free_grant' | 'purchase' | 'debit'
+
+export interface CreditChange {
+  userId: string
+  // Positive for a grant or purchase, negative for a debit.
+  credits: number
+  kind: CreditEntryKind
+  // What caused it: a run id, a Stripe event id, or 'signup'.
+  reference: string
+  // Applied at most once per key, so retries and replayed webhooks are safe.
+  idempotencyKey: string
+  at: string
+}
+
+export type CreditChangeResult = 'applied' | 'duplicate' | 'insufficient'
+
+export interface CreditsRepository {
+  getAccount(userId: string): Promise<CreditAccount | undefined>
+  // Creates the account, with its free grant when given, in one transaction: all of it or nothing. With a markerId the grant
+  // also claims that once-only marker (the email domain), and 'marker_taken' means it was already claimed.
+  createAccount(account: CreditAccount, freeGrant?: { credits: number; markerId?: string | undefined }): Promise<'created' | 'exists' | 'marker_taken'>
+  // A debit fails as 'insufficient' when the balance is short, so concurrent debits never go below zero.
+  apply(change: CreditChange): Promise<CreditChangeResult>
+}
+
+export interface CreditsService {
+  // Creates the account on first sign-in and grants the free credits once per user and per company email domain.
+  ensureAccount(userId: string, email: string): Promise<CreditAccount>
+  balance(userId: string): Promise<number>
+  // Debits once per run (a retried charge is a duplicate, not a second debit).
+  charge(userId: string, credits: number, runId: string): Promise<CreditChangeResult>
+}
