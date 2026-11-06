@@ -6,6 +6,9 @@ import type { ProductProfile, ProfileClaim } from '@/types'
 
 const FIELD_LABEL: Record<ProfileClaim['field'], string> = { oneLiner: 'What you sell', category: 'Category', valueProp: 'Strength', pricingSignal: 'Pricing' }
 
+// "2 Nov 2026": the month as a word, so no reader takes 2 Nov for 11 Feb.
+const READ_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+
 function sourceLabel(url: string): string {
   if (!url) return ''
   const parsed = new URL(url)
@@ -23,7 +26,7 @@ interface ClaimProps {
 function ClaimRow({ claim, id, crawledAt, corrected, onCorrect }: ClaimProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(corrected ?? claim.text)
-  const date = new Date(crawledAt).toLocaleDateString()
+  const date = READ_DATE.format(new Date(crawledAt))
   if (editing) {
     return (
       <li className="claim">

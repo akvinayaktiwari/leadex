@@ -8,6 +8,11 @@ interface Props {
   onToggle: (segmentId: string) => void
 }
 
+function buildLabel(count: number): string {
+  if (count === 0) return 'Pick segments to build leads'
+  return `Build leads for ${count} segment${count === 1 ? '' : 's'}`
+}
+
 function SegmentCard({ segment, checked, onToggle }: { segment: IcpSegment; checked: boolean; onToggle: () => void }) {
   return (
     <li className={`card segment${checked ? ' segment-selected' : ''}`}>
@@ -33,7 +38,7 @@ export function SegmentPicker({ segments, selected, onToggle }: Props) {
           <SegmentCard key={segment.segmentId} segment={segment} checked={selected.has(segment.segmentId)} onToggle={() => onToggle(segment.segmentId)} />
         ))}
       </ul>
-      <button type="button" disabled>Build leads for {selected.size} segment{selected.size === 1 ? '' : 's'}</button>
+      <button type="button" disabled>{buildLabel(selected.size)}</button>
       <p className="hint">Lead builds open with accounts and credits.</p>
     </section>
   )
