@@ -9,15 +9,21 @@ function seconds(ms: number | undefined): string {
 export function StepTimeline({ run, connection }: { run: RunView; connection: ConnectionState }) {
   return (
     <section className="panel" aria-label="Progress">
-      <ol className="steps">
-        {run.steps.map((step) => (
-          <li key={step.step} className={`step step-${step.state}`}>
-            <span className="mark" aria-hidden="true">{MARK[step.state]}</span> {step.label}{seconds(step.durationMs)}
-          </li>
-        ))}
-      </ol>
-      {run.notes.length > 0 ? <ul className="notes">{run.notes.map((note, i) => <li key={i}>{note}</li>)}</ul> : null}
-      {connection === 'reconnecting' && !run.end ? <p className="hint">Connection lost, reconnecting…</p> : null}
+      {/* Polite live region: screen readers announce each new step and the connection status as they arrive. */}
+      <div role="status" aria-live="polite">
+        <ol className="steps">
+          {run.steps.map((step) => (
+            <li key={step.step} className={`step step-${step.state}`}>
+              <span className="mark" aria-hidden="true">{MARK[step.state]}</span> {step.label}{seconds(step.durationMs)}
+            </li>
+          ))}
+        </ol>
+        {run.notes.length > 0 ? <ul className="notes">{run.notes.map((note, i) => <li key={i}>{note}</li>)}</ul> : null}
+        {connection === 'reconnecting' && !run.end ? <p className="hint">Connection lost, reconnecting…</p> : null}
+        {connection === 'unavailable' ? (
+          <p className="status-bad">We couldn&apos;t load this analysis. The link may have expired. <a href="/">Start a new analysis</a></p>
+        ) : null}
+      </div>
       {run.end?.status === 'failed' ? <p className="status-bad">{run.end.error?.message ?? 'The analysis failed.'}</p> : null}
     </section>
   )

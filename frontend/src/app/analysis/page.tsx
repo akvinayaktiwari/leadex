@@ -10,7 +10,7 @@ function AnalysisFromQuery() {
   const params = useSearchParams()
   const runId = params.get('run')
   const domain = params.get('domain')
-  if (!runId || !domain) return <main className="analysis"><p className="status-bad">This link is missing its analysis. Start again from the home page.</p></main>
+  if (!runId || !domain) return <main className="analysis"><p className="status-bad">This link is missing its analysis. <a href="/">Start a new analysis</a></p></main>
   return <AnalysisView runId={runId} domain={domain} />
 }
 
