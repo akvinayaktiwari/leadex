@@ -1,12 +1,12 @@
 // Credit balances on leadex_users and the append-only leadex_credit_ledger (spec "Credits"). Every change is one
 // transaction: the balance update (a debit only while the balance covers it), a ledger entry, and a once-only key.
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb'
-import { GetCommand, PutCommand, TransactWriteCommand, type DynamoDBDocumentClient, type TransactWriteCommandInput } from '@aws-sdk/lib-dynamodb'
+import { GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand, type DynamoDBDocumentClient, type TransactWriteCommandInput } from '@aws-sdk/lib-dynamodb'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { CreditAccount, CreditChange, CreditChangeResult, CreditsRepository } from '../types/index.js'
 
-const accountSchema = z.object({ userId: z.string(), email: z.string(), creditBalance: z.number(), createdAt: z.string() }) satisfies z.ZodType<CreditAccount>
+const accountSchema = z.object({ userId: z.string(), email: z.string(), creditBalance: z.number(), createdAt: z.string(), monthlyCapUsdCents: z.number().optional() }) satisfies z.ZodType<CreditAccount>
 
 const BALANCE = 0
 const IDEMPOTENCY = 2
@@ -26,7 +26,10 @@ function applyItems(tables: { users: string; ledger: string }, change: CreditCha
     } },
     { Put: {
       TableName: tables.ledger, ConditionExpression: 'attribute_not_exists(entryKey)',
-      Item: { userId: change.userId, entryKey: `${change.at}#${randomUUID()}`, kind: change.kind, credits: change.credits, reference: change.reference, createdAt: change.at },
+      Item: {
+        userId: change.userId, entryKey: `${change.at}#${randomUUID()}`, kind: change.kind, credits: change.credits, reference: change.reference, createdAt: change.at,
+        ...(change.amountUsdCents === undefined ? {} : { amountUsdCents: change.amountUsdCents }),
+      },
     } },
     { Put: {
       TableName: tables.ledger, ConditionExpression: 'attribute_not_exists(entryKey)',
@@ -70,6 +73,20 @@ export function createCreditsTableRepository(client: DynamoDBDocumentClient, tab
         if (freeGrant?.markerId && cancelledAt(error, MARKER)) return 'marker_taken'
         throw error
       }
+    },
+    async setMonthlyCap(userId: string, capUsdCents: number): Promise<void> {
+      await client.send(new UpdateCommand({
+        TableName: tables.users, Key: { userId }, ConditionExpression: 'attribute_exists(userId)',
+        UpdateExpression: 'SET monthlyCapUsdCents = :cap', ExpressionAttributeValues: { ':cap': capUsdCents },
+      }))
+    },
+    async purchasedInMonth(userId: string, monthPrefix: string): Promise<number> {
+      const result = await client.send(new QueryCommand({
+        TableName: tables.ledger, ConsistentRead: true,
+        KeyConditionExpression: 'userId = :userId AND begins_with(entryKey, :month)', FilterExpression: 'kind = :purchase',
+        ExpressionAttributeValues: { ':userId': userId, ':month': monthPrefix, ':purchase': 'purchase' },
+      }))
+      return (result.Items ?? []).reduce((sum, item) => sum + (typeof item.amountUsdCents === 'number' ? item.amountUsdCents : 0), 0)
     },
     async apply(change: CreditChange): Promise<CreditChangeResult> {
       try {

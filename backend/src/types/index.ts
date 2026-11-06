@@ -1073,6 +1073,8 @@ export interface CreditAccount {
   email: string
   creditBalance: number
   createdAt: string
+  // The most this user lets themselves spend on credits per UTC month, set before the first purchase.
+  monthlyCapUsdCents?: number | undefined
 }
 
 export type CreditEntryKind = 'free_grant' | 'purchase' | 'debit'
@@ -1087,6 +1089,8 @@ export interface CreditChange {
   // Applied at most once per key, so retries and replayed webhooks are safe.
   idempotencyKey: string
   at: string
+  // Purchases only: what was paid, so checkout can enforce the monthly cap.
+  amountUsdCents?: number | undefined
 }
 
 export type CreditChangeResult = 'applied' | 'duplicate' | 'insufficient'
@@ -1098,6 +1102,46 @@ export interface CreditsRepository {
   createAccount(account: CreditAccount, freeGrant?: { credits: number; markerId?: string | undefined }): Promise<'created' | 'exists' | 'marker_taken'>
   // A debit fails as 'insufficient' when the balance is short, so concurrent debits never go below zero.
   apply(change: CreditChange): Promise<CreditChangeResult>
+  setMonthlyCap(userId: string, capUsdCents: number): Promise<void>
+  // Sum of purchases whose ledger entry starts with the month prefix (YYYY-MM).
+  purchasedInMonth(userId: string, monthPrefix: string): Promise<number>
+}
+
+export interface CreditPack {
+  packId: string
+  credits: number
+  priceUsdCents: number
+}
+
+export interface CheckoutSessionRequest {
+  userId: string
+  email: string
+  pack: CreditPack
+  successUrl: string
+  cancelUrl: string
+}
+
+export interface PaymentsRepository {
+  // Creates a Stripe Checkout Session and returns its URL.
+  createCheckoutSession(request: CheckoutSessionRequest): Promise<string>
+}
+
+export type StartCheckoutResult =
+  | { ok: true; checkoutUrl: string }
+  | { ok: false; code: 'unknown_pack' | 'monthly_cap_required' | 'monthly_cap_reached' | 'invalid_cap' }
+
+export interface StripeWebhookEvent {
+  id: string
+  type: string
+  session?: { userId: string; packId: string; paid: boolean; amountUsdCents: number } | undefined
+}
+
+export type WebhookResult = 'granted' | 'duplicate' | 'ignored'
+
+export interface PaymentsService {
+  // monthlyCapUsd: required the first time, when the account has no cap yet.
+  startCheckout(userId: string, packId: string, monthlyCapUsd?: number): Promise<StartCheckoutResult>
+  handleEvent(event: StripeWebhookEvent): Promise<WebhookResult>
 }
 
 export interface CreditsService {
