@@ -201,4 +201,14 @@ describe('LeadexStack', () => {
       .map((resource) => (resource.Properties.Environment?.Variables ?? {}) as Record<string, unknown>)
     expect(closed.some((vars) => 'TURNSTILE_VERIFY_URL' in vars)).toBe(false)
   })
+
+  // protects=the local stack (backend/tools/local-tables.ts) creates the same DynamoDB tables and keys as CDK;
+  // fails_when=a table or key is added in CDK but not locally, so the app works in AWS and fails on a laptop (or the reverse);
+  // no_claim=TTL attributes are not compared (DynamoDB Local ignores TTL).
+  it('matches the local table list', async () => {
+    const { LOCAL_TABLES } = await import('../../backend/tools/local-tables')
+    const shape = (spec: { envName: string; id: string; partitionKey: string; sortKey?: { name: string; type: string } | undefined }) =>
+      ({ envName: spec.envName, id: spec.id, partitionKey: spec.partitionKey, sortKey: spec.sortKey ? `${spec.sortKey.name}:${spec.sortKey.type}` : null })
+    expect(LOCAL_TABLES.map(shape)).toEqual(TABLE_SPECS.map(shape))
+  })
 })

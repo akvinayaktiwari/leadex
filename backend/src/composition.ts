@@ -39,7 +39,7 @@ export function createRunStore(env: RunStoreEnv): RunStore {
   return {
     runs: createRunsTableRepository(documentClient, env.TABLE_RUNS),
     events: createRunEventsTableRepository(documentClient, env.TABLE_RUN_EVENTS),
-    queue: createRunQueueRepository(createSqsClient(env.AWS_REGION), env.SQS_RUNS_QUEUE_URL),
+    queue: createRunQueueRepository(createSqsClient(env.AWS_REGION, env.SQS_ENDPOINT), env.SQS_RUNS_QUEUE_URL),
     analysisCache: createAnalysisCacheTableRepository(documentClient, env.TABLE_ANALYSES),
   }
 }
