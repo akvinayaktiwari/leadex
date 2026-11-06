@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { INDUSTRIES } from '../config/industries.js'
-import type { RunEvent, RunJobMessage, RunRecord } from '../types/index.js'
+import type { CompanyFilters, IcpSegment, LeadBuildInput, ProductProfile, RunEvent, RunJobMessage, RunRecord } from '../types/index.js'
 
 const runTypeSchema = z.enum(['analysis', 'lead_build'])
 
@@ -13,6 +13,26 @@ const stepIdSchema = z.enum(['crawl', 'profile', 'competitors', 'segments', 'pro
 
 const runErrorSchema = z.object({ code: z.string().min(1), message: z.string() })
 
+const companyFiltersSchema = z.object({
+  industries: z.array(z.string()), employeeMin: z.number(), employeeMax: z.number(),
+  countries: z.array(z.string()), keywords: z.array(z.string()), technologies: z.array(z.string()),
+}) satisfies z.ZodType<CompanyFilters>
+
+export const productProfileSchema = z.object({
+  domain: z.string().min(1), name: z.string(), oneLiner: z.string(), valueProps: z.array(z.string()), category: z.string(),
+  pricingSignals: z.array(z.string()), servedMarkets: z.array(z.string()), crawledAt: z.string(),
+  claims: z.array(z.object({ field: z.enum(['oneLiner', 'category', 'valueProp', 'pricingSignal']), text: z.string(), sourceUrl: z.string() })),
+}) satisfies z.ZodType<ProductProfile>
+
+export const icpSegmentSchema = z.object({
+  segmentId: z.string().min(1), name: z.string(), useCase: z.string(), pain: z.string(), criteria: z.array(z.string()),
+  buyerTitles: z.array(z.string()), filters: companyFiltersSchema, sharePct: z.number(),
+}) satisfies z.ZodType<IcpSegment>
+
+const leadBuildInputSchema = z.object({
+  profile: productProfileSchema, segments: z.array(icpSegmentSchema).min(1), leadCount: z.int().positive(),
+}) satisfies z.ZodType<LeadBuildInput>
+
 export const runRecordSchema = z.object({
   runId: z.string().min(1),
   type: runTypeSchema,
@@ -22,6 +42,7 @@ export const runRecordSchema = z.object({
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
   error: runErrorSchema.optional(),
+  leadBuild: leadBuildInputSchema.optional(),
 }) satisfies z.ZodType<RunRecord>
 
 const eventBase = { seq: z.int().positive(), ts: z.string().min(1) }
@@ -139,3 +160,16 @@ export const segmentsDraftSchema = z.object({
 })
 
 export type SegmentsDraft = z.infer<typeof segmentsDraftSchema>
+
+// What the model returns when qualifying a batch of lead candidates (#12). Ids are the ones the step sent.
+export const leadFitDraftSchema = z.object({
+  leads: z.array(z.object({
+    id: z.string().min(1),
+    fitScore: z.int().min(0).max(100),
+    // One sentence on why this seller's offer fits this company, from the fields given only.
+    angle: z.string().max(300),
+    // True when no honest angle exists, whatever the score.
+    skip: z.boolean(),
+  })),
+})
+export type LeadFitDraft = z.infer<typeof leadFitDraftSchema>

@@ -89,7 +89,7 @@ export class LeadexStack extends Stack {
     const environment = this.sharedEnvironment(props, tables, queue, key)
     const shared = this.createWorkerShared(props.stage)
     const { api, stream } = this.createFunctions(environment, this.analysesEnvironment(props), tables, queue, key, shared.appSecret)
-    this.createWorker({ ...environment, LLM_MODEL_SMART: props.llmModels.smart, LLM_MODEL_FAST: props.llmModels.fast }, tables, queue, key, shared)
+    this.createWorker({ ...environment, LLM_MODEL_SMART: props.llmModels.smart, LLM_MODEL_FAST: props.llmModels.fast }, tables, queue, key, shared, props.stage)
     this.createIngestTask(props, shared)
     new CfnOutput(this, 'ApiUrl', { value: api.url })
     new CfnOutput(this, 'StreamUrl', { value: stream.url })
@@ -216,6 +216,7 @@ export class LeadexStack extends Stack {
     queue: sqs.Queue,
     key: kms.Key,
     shared: WorkerShared,
+    stage: Stage,
   ): void {
     const service = new ecsPatterns.QueueProcessingFargateService(this, 'Worker', {
       vpc: shared.vpc,
@@ -229,8 +230,9 @@ export class LeadexStack extends Stack {
       taskSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64, operatingSystemFamily: ecs.OperatingSystemFamily.LINUX },
       // Lambda sets (and reserves) AWS_REGION itself; the Fargate container needs it passed in.
-      environment: { ...environment, AWS_REGION: this.region },
-      secrets: { ANTHROPIC_API_KEY: ecs.Secret.fromSecretsManager(shared.appSecret, 'ANTHROPIC_API_KEY') },
+      // CLICKHOUSE_* lets the worker run lead builds from Leadex Data (#12).
+      environment: { ...environment, AWS_REGION: this.region, CLICKHOUSE_DATABASE: `leadex_${stage}` },
+      secrets: Object.fromEntries(['ANTHROPIC_API_KEY', ...CLICKHOUSE_SECRET_KEYS].map((name) => [name, ecs.Secret.fromSecretsManager(shared.appSecret, name)])),
       circuitBreaker: { rollback: true },
       minHealthyPercent: 100,
     })

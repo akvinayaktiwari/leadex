@@ -29,11 +29,21 @@ const analysesEnvSchema = z.object({
   APP_SECRET_ID: z.string().min(1).optional(),
 }).refine((env) => env.TURNSTILE_SECRET || env.APP_SECRET_ID, { path: ['TURNSTILE_SECRET'], message: 'set TURNSTILE_SECRET or APP_SECRET_ID' }) satisfies z.ZodType<AnalysesEnv, Record<string, unknown>>
 
+const CLICKHOUSE_KEYS = ['CLICKHOUSE_URL', 'CLICKHOUSE_USER', 'CLICKHOUSE_PASSWORD', 'CLICKHOUSE_DATABASE'] as const
+
 const workerEnvSchema = apiEnvSchema.extend(runStoreEnvSchema.shape).extend({
   ANTHROPIC_API_KEY: z.string().min(1),
   LLM_MODEL_SMART: z.string().min(1),
   LLM_MODEL_FAST: z.string().min(1),
-}) satisfies z.ZodType<WorkerEnv>
+  CLICKHOUSE_URL: z.url().optional(),
+  CLICKHOUSE_USER: z.string().min(1).optional(),
+  CLICKHOUSE_PASSWORD: z.string().min(1).optional(),
+  CLICKHOUSE_DATABASE: z.string().regex(/^[a-z][a-z0-9_]*$/, 'lowercase letters, digits and underscores').optional(),
+}).superRefine((env, context) => {
+  const set = CLICKHOUSE_KEYS.filter((key) => env[key] !== undefined)
+  if (set.length === 0 || set.length === CLICKHOUSE_KEYS.length) return
+  for (const key of CLICKHOUSE_KEYS) if (env[key] === undefined) context.addIssue({ code: 'custom', path: [key], message: 'set all CLICKHOUSE_* or none' })
+}) satisfies z.ZodType<WorkerEnv, Record<string, unknown>>
 
 const leadDataEnvSchema = z.object({
   CLICKHOUSE_URL: z.url(),

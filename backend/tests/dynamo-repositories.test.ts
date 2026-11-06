@@ -73,6 +73,13 @@ describe.runIf(ENDPOINT)('DynamoDB run repositories', () => {
     expect(done?.status).toBe('done')
     expect(done?.error).toBeUndefined()
     expect(await runs.get('missing')).toBeUndefined()
+    const leadBuild = {
+      profile: { domain: 'seller.com', name: 'Seller', oneLiner: '', valueProps: [], category: 'c', pricingSignals: [], servedMarkets: ['IN'], claims: [], crawledAt: '2026-10-21T10:00:00.000Z' },
+      segments: [{ segmentId: 's', name: 'S', useCase: 'u', pain: 'p', criteria: [], buyerTitles: ['CEO'], sharePct: 100, filters: { industries: [], employeeMin: 0, employeeMax: 0, countries: ['IN'], keywords: [], technologies: [] } }],
+      leadCount: 5,
+    }
+    await runs.create(sampleRun({ runId: 'run_build', type: 'lead_build', leadBuild }))
+    expect((await runs.get('run_build'))?.leadBuild).toEqual(leadBuild)
     await expect(runs.setStatus('missing', 'done', '2026-10-21T10:02:00.000Z')).rejects.toThrow()
   })
 

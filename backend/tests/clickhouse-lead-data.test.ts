@@ -3,6 +3,7 @@ import { BLOCKED_COUNTRIES } from '../src/lib/countries.js'
 import { createClickhouseClient } from '../src/lib/clickhouse-client.js'
 import { LeadDataRuleError } from '../src/lib/errors.js'
 import { companyIdFor, personKeyFor, suppressionHash } from '../src/lib/lead-keys.js'
+import { createEmailFinderRepository } from '../src/repositories/email-finder-repository.js'
 import { createLeadDataRepository } from '../src/repositories/lead-data-repository.js'
 import { createLeadDataService } from '../src/services/lead-data-service.js'
 import type { CompanyRecord, CompanySearchQuery, LeadDataEnv, PersonRecord } from '../src/types/index.js'
@@ -161,5 +162,22 @@ describe.runIf(URL_)('Leadex Data on ClickHouse', () => {
     const queue = (await repository.companiesWithoutLei(100)).map((row) => row.domain)
     expect(queue).toContain('needs-lei.example')
     expect(queue).not.toContain('matched.example')
+  })
+
+  // protects=a lead build reads each person's latest email check and only a 'valid' one counts (#12);
+  // fails_when=an older valid row outlives a newer 'invalid' check, or catch_all/unknown addresses are returned as verified;
+  // no_claim=n/a.
+  it('returns only verified emails, from the latest check', async () => {
+    const emails = createEmailFinderRepository(client)
+    const result = (personKey: string, email: string, status: 'valid' | 'invalid' | 'catch_all', checkedAt: string) =>
+      ({ personKey, email, pattern: 'first', status, checkedBy: 'test', checkedAt })
+    await emails.insertResults([
+      result('pk-valid', 'asha@valid.example', 'valid', '2026-10-29T09:00:00.000Z'),
+      result('pk-went-bad', 'old@bad.example', 'valid', '2026-10-28T09:00:00.000Z'),
+      result('pk-catch-all', 'x@catch.example', 'catch_all', '2026-10-29T09:00:00.000Z'),
+    ])
+    await emails.insertResults([result('pk-went-bad', 'old@bad.example', 'invalid', '2026-10-30T09:00:00.000Z')])
+    expect(await repository.validEmails(['pk-valid', 'pk-went-bad', 'pk-catch-all', 'pk-none'])).toEqual([{ personKey: 'pk-valid', email: 'asha@valid.example' }])
+    expect(await repository.validEmails([])).toEqual([])
   })
 })

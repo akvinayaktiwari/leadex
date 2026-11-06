@@ -228,12 +228,20 @@ function searchMethods(client: ClickHouseClient): Pick<LeadDataRepository, 'sear
   }
 }
 
-function companyLookupMethods(client: ClickHouseClient): Pick<LeadDataRepository, 'findCompaniesByDomain' | 'companiesWithoutLei'> {
+function companyLookupMethods(client: ClickHouseClient): Pick<LeadDataRepository, 'findCompaniesByDomain' | 'validEmails' | 'companiesWithoutLei'> {
   return {
     async findCompaniesByDomain(domains: string[]): Promise<CompanyRecord[]> {
       if (domains.length === 0) return []
       const rows = await selectRows<CompanyRow>(client, `SELECT ${COMPANY_COLUMNS} FROM companies FINAL WHERE domain IN {domains:Array(String)} ORDER BY domain`, { domains })
       return rows.map(fromCompanyRow)
+    },
+    async validEmails(personKeys: string[]): Promise<{ personKey: string; email: string }[]> {
+      if (personKeys.length === 0) return []
+      // emails keeps the latest check per person (ReplacingMergeTree on checked_at), so FINAL then the status filter.
+      const rows = await selectRows<{ person_key: string; email: string }>(client,
+        "SELECT person_key, email FROM (SELECT person_key, email, status FROM emails FINAL WHERE person_key IN {keys:Array(String)}) WHERE status = 'valid'",
+        { keys: personKeys })
+      return rows.map((row) => ({ personKey: row.person_key, email: row.email }))
     },
     async companiesWithoutLei(limit: number): Promise<CompanyRecord[]> {
       const rows = await selectRows<CompanyRow>(client,

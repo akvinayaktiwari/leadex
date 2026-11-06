@@ -50,11 +50,13 @@ export interface MemoryLeadData extends LeadDataRepository {
   people: PersonRecord[]
   facts: Fact[]
   suppression: SuppressionEntry[]
+  // Latest check status per person, as the emails table would hold it.
+  emails: Map<string, { email: string; status: string }>
 }
 
 // Stores everything and returns it unfiltered by country, so tests can prove the service's own guard.
 export function memoryLeadData(): MemoryLeadData {
-  const store: Pick<MemoryLeadData, 'companies' | 'people' | 'facts' | 'suppression'> = { companies: [], people: [], facts: [], suppression: [] }
+  const store: Pick<MemoryLeadData, 'companies' | 'people' | 'facts' | 'suppression' | 'emails'> = { companies: [], people: [], facts: [], suppression: [], emails: new Map() }
   return {
     ...store,
     async insertCompanies(rows: CompanyRecord[]) { store.companies.push(...rows) },
@@ -70,6 +72,12 @@ export function memoryLeadData(): MemoryLeadData {
     async companiesWithoutLei(limit: number) {
       const latest = new Map(store.companies.map((company) => [company.domain, company]))
       return [...latest.values()].filter((company) => !company.lei && company.legalName).slice(0, limit)
+    },
+    async validEmails(keys: string[]) {
+      return keys.flatMap((personKey) => {
+        const row = store.emails.get(personKey)
+        return row?.status === 'valid' ? [{ personKey, email: row.email }] : []
+      })
     },
     async insertSuppression(entries: SuppressionEntry[]) { store.suppression.push(...entries) },
     async findSuppressed(kind: SuppressionKind, hashes: string[]) {
