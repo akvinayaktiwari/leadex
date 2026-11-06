@@ -30,6 +30,7 @@ function ClaimRow({ claim, id, crawledAt, corrected, onCorrect }: ClaimProps) {
         <label htmlFor={id} className="claim-field">{FIELD_LABEL[claim.field]}</label>
         <input id={id} value={draft} onChange={(event) => setDraft(event.target.value)} />
         <button type="button" onClick={() => { onCorrect(draft.trim() || claim.text); setEditing(false) }}>Save</button>
+        <button type="button" className="link-button" onClick={() => { setDraft(corrected ?? claim.text); setEditing(false) }}>Cancel</button>
       </li>
     )
   }
