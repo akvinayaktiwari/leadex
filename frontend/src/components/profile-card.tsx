@@ -40,7 +40,7 @@ function ClaimRow({ claim, id, crawledAt, corrected, onCorrect }: ClaimProps) {
       <span className="claim-source">
         {claim.sourceUrl ? <><a href={claim.sourceUrl} target="_blank" rel="noreferrer">{sourceLabel(claim.sourceUrl)}</a> · read {date}</> : <span className="status-bad">No source, check this</span>}
       </span>
-      <button type="button" className="link-button" onClick={() => setEditing(true)}>Correct this</button>
+      <button type="button" className="link-button" aria-label={`Correct "${corrected ?? claim.text}"`} onClick={() => setEditing(true)}>Correct this</button>
     </li>
   )
 }
