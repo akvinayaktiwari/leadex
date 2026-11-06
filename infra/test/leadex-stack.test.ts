@@ -201,4 +201,19 @@ describe('LeadexStack', () => {
       .map((resource) => (resource.Properties.Environment?.Variables ?? {}) as Record<string, unknown>)
     expect(closed.some((vars) => 'TURNSTILE_VERIFY_URL' in vars)).toBe(false)
   })
+
+  // protects=the run worker gets the ClickHouse connection for lead builds (#12) as secrets plus the stage's database, never
+  // as plain environment values;
+  // fails_when=lead builds end with pipeline_unavailable in AWS, or the ClickHouse password lands in the template;
+  // no_claim=does not check the secret holds the keys (created by hand, see README).
+  it('gives the worker Leadex Data for lead builds', () => {
+    const containers = Object.values(template.findResources('AWS::ECS::TaskDefinition'))
+      .flatMap((resource) => resource.Properties.ContainerDefinitions as ContainerDefinition[])
+    const worker = containers.find((container) => !container.Command?.includes('ingest.mjs'))
+    if (!worker) throw new Error('no worker container in template')
+    expect((worker.Secrets ?? []).map((entry) => entry.Name)).toEqual(expect.arrayContaining(['ANTHROPIC_API_KEY', 'CLICKHOUSE_URL', 'CLICKHOUSE_USER', 'CLICKHOUSE_PASSWORD']))
+    const environment = new Map(worker.Environment.map((entry) => [entry.Name, entry.Value]))
+    expect(environment.get('CLICKHOUSE_DATABASE')).toBe('leadex_dev')
+    expect(environment.has('CLICKHOUSE_PASSWORD')).toBe(false)
+  })
 })
